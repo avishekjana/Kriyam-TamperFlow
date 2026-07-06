@@ -1,0 +1,9 @@
+torch>=2.2
+torchvision>=0.17
+pillow>=10.0
+numpy>=1.26
+scikit-learn>=1.4
+scipy>=1.12
+tqdm>=4.66
+datasets>=2.18
+huggingface-hub>=0.22

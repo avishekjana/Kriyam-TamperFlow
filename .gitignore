@@ -1,0 +1,48 @@
+# Project data — fetched via scripts/download_data.sh
+data/*
+indic-docforgebench-dataset
+indic-docforgebench-dataset/*
+# Prediction submissions and evaluation output
+predictions/*
+results/*
+reports/*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Model weights — fetched via scripts/download_weights.sh
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.onnx
+
+# Secrets
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+Claude.md
+.claude
+
+scripts/generate_metadata.py
+scripts/upload_data.py
+scripts/replace_ai_generated.py
