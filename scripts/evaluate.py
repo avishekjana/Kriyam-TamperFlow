@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -308,6 +309,7 @@ def run_evaluation(
     document_threshold: float = DOCUMENT_THRESHOLD,
     iou_threshold: float = IOU_THRESHOLD,
     report_template: str = "v1",
+    workers: int = 2,
 ) -> dict[str, dict[str, Any]]:
     """Core evaluation routine.
 
@@ -338,17 +340,23 @@ def run_evaluation(
     total = len(samples) * len(tiers)
 
     with tqdm(total=total, unit="pred", desc="Scoring") as pbar:
-        for sample in samples:
-            for tier in tiers:
-                pbar.set_postfix(id=sample["id"], tier=tier, refresh=False)
-                path = _pred_path(predictions_dir, sample["id"], tier)
-                pred = _load_prediction(path)
-                if pred is None:
-                    skipped += 1
-                    pbar.update(1)
-                    continue
-                result = _score_sample(sample, pred, tier, document_threshold=document_threshold, iou_threshold=iou_threshold)
-                tier_results[tier].append(result)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_tier: dict = {}
+            for sample in samples:
+                for tier in tiers:
+                    path = _pred_path(predictions_dir, sample["id"], tier)
+                    pred = _load_prediction(path)
+                    if pred is None:
+                        skipped += 1
+                        pbar.update(1)
+                        continue
+                    fut = executor.submit(
+                        _score_sample, sample, pred, tier,
+                        document_threshold, iou_threshold,
+                    )
+                    future_to_tier[fut] = tier
+            for fut in as_completed(future_to_tier):
+                tier_results[future_to_tier[fut]].append(fut.result())
                 pbar.update(1)
 
     if skipped:
@@ -483,6 +491,13 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=2,
+        metavar="N",
+        help="Number of parallel worker threads for scoring. Default: 2.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable debug logging.",
@@ -508,6 +523,7 @@ def main(argv: list[str] | None = None) -> None:
         document_threshold=args.document_threshold,
         iou_threshold=args.iou_threshold,
         report_template=args.report_template,
+        workers=args.workers,
     )
 
     _print_tables(tier_scores)

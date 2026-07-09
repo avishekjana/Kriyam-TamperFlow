@@ -203,6 +203,17 @@ python scripts/evaluate.py \
 
 > **Note:** Changing the IoU threshold affects region matching and requires a full re-evaluation. It cannot be applied from cached raw results (see Step 6b).
 
+**Speed up with multiple cores**
+
+The evaluator scores samples in parallel using threads (default: 2 workers). Set `--workers` to the number of CPU cores you want to use:
+
+```bash
+python scripts/evaluate.py \
+  --predictions predictions/your_model_name/ \
+  --workers 8 \
+  --report-out reports/your_model_full.html
+```
+
 **Choose the report template**
 
 Three HTML report layouts are available:
@@ -228,6 +239,7 @@ python scripts/evaluate.py \
 | `--data-dir DIR` | `./data` | Root of the benchmark data directory |
 | `--tiers C0 C2 C4` | all three | Compression tiers to evaluate |
 | `--report-out PATH` | `reports/report.html` | Output path for the HTML report |
+| `--workers N` | `2` | Number of parallel worker threads for scoring |
 | `--document-threshold FLOAT` | `0.5` | Confidence threshold for binary `pred_label` (Doc-F1, FPR) |
 | `--iou-threshold FLOAT` | `0.1` | Minimum IoU for a region pair to count as a true positive |
 | `--report-template v1\|v2\|v3` | `v1` | Report layout |

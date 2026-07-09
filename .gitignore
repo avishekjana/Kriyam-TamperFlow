@@ -1,7 +1,7 @@
 # Project data — fetched via scripts/download_data.sh
 data/*
-indic-docforgebench-dataset
-indic-docforgebench-dataset/*
+kriyam-tamperflow-dataset
+kriyam-tamperflow-dataset/*
 # Prediction submissions and evaluation output
 predictions/*
 results/*
