@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from kriyam.metrics import (
+    _operating_point_at_tpr,
     aggregate,
     bboxes_to_mask,
     compression_robustness,
@@ -230,10 +231,19 @@ def test_aggregate_single_sample_keys() -> None:
         "region_f1_ci",
         "doc_auc",
         "doc_auc_ci",
+        "doc_auprc",
+        "doc_auprc_ci",
         "doc_f1",
         "doc_f1_ci",
         "doc_fpr",
         "doc_fpr_ci",
+        "doc_fpr_at_tpr90",
+        "doc_fpr_at_tpr90_ci",
+        "doc_fpr_at_tpr90_valid",
+        "doc_f1_at_tpr90",
+        "doc_f1_at_tpr90_ci",
+        "doc_f1_at_tpr90_valid",
+        "doc_tpr90_achieved_tpr",
         "n_samples",
     }
     assert expected_keys.issubset(out.keys())
@@ -303,6 +313,41 @@ def test_aggregate_single_class_auc_fallback() -> None:
     results = [_result(confidence=0.9, gt_label=1) for _ in range(5)]
     out = aggregate(results)
     assert out["doc_auc"] == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# _operating_point_at_tpr
+# ---------------------------------------------------------------------------
+
+
+def test_operating_point_well_separated() -> None:
+    # Tampered samples score high, authentic samples score low → clean separation.
+    # At threshold=0.8 all 3 tampered are TP and 0 authentic are FP → TPR=1, FPR=0.
+    gt = np.array([1, 1, 1, 0, 0])
+    conf = np.array([0.9, 0.85, 0.8, 0.2, 0.1])
+    out = _operating_point_at_tpr(gt, conf)
+    assert out["valid"] is True
+    assert out["achieved_tpr"] >= 0.9
+    assert out["fpr"] == pytest.approx(0.0)
+
+
+def test_operating_point_single_class_returns_invalid() -> None:
+    # Only tampered samples — TPR is undefined; should return valid=False.
+    gt = np.array([1, 1, 1, 1, 1])
+    conf = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+    out = _operating_point_at_tpr(gt, conf)
+    assert out["valid"] is False
+    assert out["achieved_tpr"] == pytest.approx(0.0)
+
+
+def test_operating_point_perfect_separation() -> None:
+    # All tampered above 0.5, all authentic below → FPR=0 at TPR=1.
+    gt = np.array([1, 1, 0, 0])
+    conf = np.array([0.9, 0.8, 0.3, 0.2])
+    out = _operating_point_at_tpr(gt, conf)
+    assert out["valid"] is True
+    assert out["fpr"] == pytest.approx(0.0)
+    assert out["f1"] == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------

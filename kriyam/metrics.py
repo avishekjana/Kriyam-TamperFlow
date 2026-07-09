@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 
 # Type alias used throughout this module.
 _Region = dict[str, Any]
@@ -252,6 +252,117 @@ def _doc_metrics_bootstrap(
     }
 
 
+def _operating_point_at_tpr(
+    gt_labels: np.ndarray,
+    confidences: np.ndarray,
+    target_tpr: float = 0.9,
+) -> dict[str, Any]:
+    """Return the operating point where TPR first reaches *target_tpr*.
+
+    Finds the smallest index in the ROC curve where ``tpr[i] >= target_tpr``
+    (the highest threshold that still achieves the target recall), giving the
+    lowest FPR at that operating point.
+
+    Note on AUPRC: ``average_precision_score`` uses a random baseline equal to
+    the positive class prior, not 0.5.  For this benchmark (~67 % tampered) the
+    random AUPRC baseline is ≈ 0.67, not 0.50.
+
+    Args:
+        gt_labels:  1-D int array (1 = tampered, 0 = authentic).
+        confidences: 1-D float array of predicted confidences.
+        target_tpr: TPR level to target (default 0.9 for FPR@TPR90).
+
+    Returns:
+        Dict with keys ``threshold``, ``achieved_tpr``, ``fpr``, ``f1``, ``valid``.
+        ``valid`` is True iff ``achieved_tpr >= target_tpr``.
+        When fewer than two classes are present, returns all-zero values with
+        ``valid = False``.
+    """
+    if len(np.unique(gt_labels)) < 2:
+        return {"threshold": 0.0, "achieved_tpr": 0.0, "fpr": 0.0, "f1": 0.0, "valid": False}
+
+    fpr_arr, tpr_arr, thresh_arr = roc_curve(gt_labels, confidences)
+
+    idxs = np.where(tpr_arr >= target_tpr)[0]
+    if len(idxs) == 0:
+        idx = int(tpr_arr.argmax())
+        valid = False
+    else:
+        idx = int(idxs[0])
+        valid = True
+
+    achieved_tpr = float(tpr_arr[idx])
+    fpr_val = float(fpr_arr[idx])
+    threshold = float(thresh_arr[idx])
+
+    pred_at_t = (confidences >= threshold).astype(int)
+    tp = int(((pred_at_t == 1) & (gt_labels == 1)).sum())
+    fp = int(((pred_at_t == 1) & (gt_labels == 0)).sum())
+    fn = int(((pred_at_t == 0) & (gt_labels == 1)).sum())
+    pr = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    rc = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = 2 * pr * rc / (pr + rc) if (pr + rc) > 0 else 0.0
+
+    return {
+        "threshold": threshold,
+        "achieved_tpr": achieved_tpr,
+        "fpr": fpr_val,
+        "f1": f1,
+        "valid": valid,
+    }
+
+
+def _operating_point_bootstrap(
+    confidences: np.ndarray,
+    gt_labels: np.ndarray,
+    target_tpr: float = 0.9,
+    n: int = 1000,
+    ci: float = 0.95,
+    rng: np.random.Generator | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Bootstrap CIs for doc_auprc, fpr_at_tpr90, and f1_at_tpr90.
+
+    Mirrors the structure of :func:`_doc_metrics_bootstrap`.  Resamples the
+    full dataset with replacement each iteration and recomputes each metric
+    from scratch — the statistically valid approach for nonlinear metrics.
+    """
+    if rng is None:
+        rng = np.random.default_rng(seed=42)
+
+    n_samples = len(confidences)
+    auprc_boot: list[float] = []
+    fpr_boot: list[float] = []
+    f1_boot: list[float] = []
+
+    for _ in range(n):
+        idx = rng.choice(n_samples, size=n_samples, replace=True)
+        c_b = confidences[idx]
+        g_b = gt_labels[idx]
+
+        if len(np.unique(g_b)) < 2:
+            auprc_boot.append(float(g_b.mean()))
+            fpr_boot.append(0.0)
+            f1_boot.append(0.0)
+            continue
+
+        auprc_boot.append(float(average_precision_score(g_b, c_b)))
+        op = _operating_point_at_tpr(g_b, c_b, target_tpr)
+        fpr_boot.append(op["fpr"])
+        f1_boot.append(op["f1"])
+
+    alpha = (1.0 - ci) / 2.0
+
+    def _pct(arr: list[float]) -> tuple[float, float]:
+        a = np.array(arr)
+        return float(np.quantile(a, alpha)), float(np.quantile(a, 1.0 - alpha))
+
+    return {
+        "auprc_ci": _pct(auprc_boot),
+        "fpr_at_tpr90_ci": _pct(fpr_boot),
+        "f1_at_tpr90_ci": _pct(f1_boot),
+    }
+
+
 def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate per-image result dicts into macro-averaged benchmark scores.
 
@@ -276,9 +387,13 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
         - ``region_precision`` / ``region_precision_ci``
         - ``region_recall``    / ``region_recall_ci``
         - ``region_f1``        / ``region_f1_ci``
-        - ``doc_auc``          / ``doc_auc_ci``
-        - ``doc_f1``           / ``doc_f1_ci``
-        - ``doc_fpr``          / ``doc_fpr_ci``
+        - ``doc_auc``               / ``doc_auc_ci``
+        - ``doc_auprc``             / ``doc_auprc_ci``
+        - ``doc_f1``                / ``doc_f1_ci``
+        - ``doc_fpr``               / ``doc_fpr_ci``
+        - ``doc_fpr_at_tpr90``      / ``doc_fpr_at_tpr90_ci`` / ``doc_fpr_at_tpr90_valid``
+        - ``doc_f1_at_tpr90``       / ``doc_f1_at_tpr90_ci``  / ``doc_f1_at_tpr90_valid``
+        - ``doc_tpr90_achieved_tpr`` (float — actual TPR reached; equals target when valid)
         - ``n_samples`` (int)
 
     Raises:
@@ -313,7 +428,15 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     doc_f1  = 2 * doc_prec * doc_rec / (doc_prec + doc_rec) if (doc_prec + doc_rec) > 0 else 0.0
     doc_fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
+    doc_auprc = (
+        float(average_precision_score(gt_labels, confidences))
+        if n_classes >= 2
+        else float(gt_labels.mean())
+    )
+
+    op = _operating_point_at_tpr(gt_labels, confidences)
     doc_cis = _doc_metrics_bootstrap(confidences, gt_labels, pred_labels, rng=rng)
+    op_cis = _operating_point_bootstrap(confidences, gt_labels, rng=rng)
 
     return {
         "region_precision": float(prec.mean()),
@@ -324,10 +447,19 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
         "region_f1_ci": _bootstrap_ci(f1, rng=rng),
         "doc_auc": doc_auc,
         "doc_auc_ci": doc_cis["auc_ci"],
+        "doc_auprc": doc_auprc,
+        "doc_auprc_ci": op_cis["auprc_ci"],
         "doc_f1": doc_f1,
         "doc_f1_ci": doc_cis["f1_ci"],
         "doc_fpr": doc_fpr,
         "doc_fpr_ci": doc_cis["fpr_ci"],
+        "doc_fpr_at_tpr90": op["fpr"],
+        "doc_fpr_at_tpr90_ci": op_cis["fpr_at_tpr90_ci"],
+        "doc_fpr_at_tpr90_valid": op["valid"],
+        "doc_f1_at_tpr90": op["f1"],
+        "doc_f1_at_tpr90_ci": op_cis["f1_at_tpr90_ci"],
+        "doc_f1_at_tpr90_valid": op["valid"],
+        "doc_tpr90_achieved_tpr": op["achieved_tpr"],
         "n_samples": len(results),
     }
 

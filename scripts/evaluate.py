@@ -154,22 +154,32 @@ def _print_tier_table(tier: str, scores: dict[str, Any]) -> None:
     print(header_row)
     print(separator)
 
-    rows = [
-        ("Region Precision", scores["region_precision"], scores["region_precision_ci"]),
-        ("Region Recall",    scores["region_recall"],    scores["region_recall_ci"]),
-        ("Region F1",        scores["region_f1"],        scores["region_f1_ci"]),
-        ("Doc AUC-ROC",      scores["doc_auc"],          scores["doc_auc_ci"]),
-        ("Doc F1",           scores["doc_f1"],           scores["doc_f1_ci"]),
-        ("FPR",              scores["doc_fpr"],          scores["doc_fpr_ci"]),
+    tpr90_valid = bool(scores.get("doc_fpr_at_tpr90_valid", True))
+    tpr90_achieved = float(scores.get("doc_tpr90_achieved_tpr", 0.9))
+
+    rows: list[tuple[str, float, tuple[float, float], bool]] = [
+        ("Region Precision", scores["region_precision"], scores["region_precision_ci"], True),
+        ("Region Recall",    scores["region_recall"],    scores["region_recall_ci"],    True),
+        ("Region F1",        scores["region_f1"],        scores["region_f1_ci"],        True),
+        ("Doc AUC-ROC",      scores["doc_auc"],          scores["doc_auc_ci"],          True),
+        ("Doc AUPRC",        scores["doc_auprc"],        scores["doc_auprc_ci"],        True),
+        ("Doc F1",           scores["doc_f1"],           scores["doc_f1_ci"],           True),
+        ("FPR",              scores["doc_fpr"],          scores["doc_fpr_ci"],          True),
+        ("FPR @ TPR=90",     scores["doc_fpr_at_tpr90"], scores["doc_fpr_at_tpr90_ci"], tpr90_valid),
+        ("F1 @ TPR=90",      scores["doc_f1_at_tpr90"],  scores["doc_f1_at_tpr90_ci"],  tpr90_valid),
     ]
-    for name, value, ci in rows:
+    any_invalid = False
+    for name, value, ci, valid in rows:
         lo, hi = ci
         ci_str = f"[{lo:.4f}, {hi:.4f}]"
+        val_str = f"{value:.4f}" + ("" if valid else " *")
+        if not valid:
+            any_invalid = True
         print(
             "| "
             + name.ljust(col_widths[0])
             + " | "
-            + f"{value:.4f}".ljust(col_widths[1])
+            + val_str.ljust(col_widths[1])
             + " | "
             + ci_str.ljust(col_widths[2])
             + " |"
@@ -178,6 +188,8 @@ def _print_tier_table(tier: str, scores: dict[str, Any]) -> None:
     n = scores.get("n_samples", "?")
     print(separator)
     print(f"  n = {n} samples")
+    if any_invalid:
+        print(f"  * TPR ≥ 0.90 not reachable — reported at max achievable TPR ({tpr90_achieved:.2f}).")
 
 
 def _print_tables(tier_scores: dict[str, dict[str, Any]]) -> None:

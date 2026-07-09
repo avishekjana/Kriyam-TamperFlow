@@ -31,18 +31,30 @@ _LOCALISATION_METRICS: list[tuple[str, str, str]] = [
 ]
 
 _DETECTION_METRICS: list[tuple[str, str, str]] = [
-    ("doc_auc",  "doc_auc_ci",  "Document AUC-ROC (Doc-AUC)"),
-    ("doc_f1",   "doc_f1_ci",   "Document F1 (Doc-F1)"),
-    ("doc_fpr",  "doc_fpr_ci",  "False Positive Rate (FPR)"),
+    ("doc_auc",           "doc_auc_ci",           "Document AUC-ROC (Doc-AUC)"),
+    ("doc_auprc",         "doc_auprc_ci",         "Document AUPRC (Doc-AUPRC)"),
+    ("doc_f1",            "doc_f1_ci",            "Document F1 (Doc-F1)"),
+    ("doc_fpr",           "doc_fpr_ci",           "False Positive Rate (FPR)"),
+    ("doc_fpr_at_tpr90",  "doc_fpr_at_tpr90_ci",  "FPR @ TPR=90% (FPR@90)"),
+    ("doc_f1_at_tpr90",   "doc_f1_at_tpr90_ci",   "F1 @ TPR=90% (F1@90)"),
 ]
 
+# Keys whose validity may be flagged False (metric not fully achievable).
+_DETECTION_VALIDITY_KEYS: dict[str, str] = {
+    "doc_fpr_at_tpr90": "doc_fpr_at_tpr90_valid",
+    "doc_f1_at_tpr90":  "doc_f1_at_tpr90_valid",
+}
+
 _METRIC_HIGHER_IS_BETTER: dict[str, bool] = {
-    "region_precision": True,
-    "region_recall":    True,
-    "region_f1":        True,
-    "doc_auc":          True,
-    "doc_f1":           True,
-    "doc_fpr":          False,
+    "region_precision":  True,
+    "region_recall":     True,
+    "region_f1":         True,
+    "doc_auc":           True,
+    "doc_auprc":         True,
+    "doc_f1":            True,
+    "doc_fpr":           False,
+    "doc_fpr_at_tpr90":  False,
+    "doc_f1_at_tpr90":   True,
 }
 
 
@@ -530,21 +542,38 @@ def _missing_authentic_warning(tier_scores: dict[str, Any]) -> str:
 
 
 
-def _metric_rows(metrics: list[tuple[str, str, str]], scores: dict[str, Any], accent: str) -> str:
+def _metric_rows(
+    metrics: list[tuple[str, str, str]],
+    scores: dict[str, Any],
+    accent: str,
+    validity_map: dict[str, bool] | None = None,
+) -> tuple[str, bool]:
+    """Return ``(html_rows, any_invalid)``."""
     rows: list[str] = []
+    any_invalid = False
     for val_key, ci_key, label in metrics:
-        val = float(scores[val_key])
-        lo, hi = _as_ci(scores[ci_key])
+        raw = scores.get(val_key)
+        if raw is None:
+            continue
+        val = float(raw)
+        ci_raw = scores.get(ci_key)
+        lo, hi = _as_ci(ci_raw) if ci_raw is not None else (val, val)
         tag_label, tag_cls = _ci_tag(lo, hi)
+
+        valid = True if (validity_map is None) else validity_map.get(val_key, True)
+        val_display = _f(val) + ("" if valid else " †")
+        if not valid:
+            any_invalid = True
+
         rows.append(
             f"<tr class='tier-stripe' style='--tier-color:{accent}'>"
             f"<td class='metric-name'>{label}</td>"
-            f"<td class='metric-val'>{_f(val)}</td>"
+            f"<td class='metric-val'>{val_display}</td>"
             f"<td class='ci-range'>[{_f(lo, 3)}, {_f(hi, 3)}]</td>"
             f"<td><span class='ci-tag {tag_cls}'>{tag_label}</span></td>"
             f"</tr>"
         )
-    return "".join(rows)
+    return "".join(rows), any_invalid
 
 
 def _tier_section(tier: str, scores: dict[str, Any]) -> str:
@@ -552,8 +581,19 @@ def _tier_section(tier: str, scores: dict[str, Any]) -> str:
     accent = _TIER_ACCENT.get(tier, "#6b7280")
     n = scores.get("n_samples", "?")
 
-    localisation_rows = _metric_rows(_LOCALISATION_METRICS, scores, accent)
-    detection_rows    = _metric_rows(_DETECTION_METRICS, scores, accent)
+    validity_map = {
+        vk: bool(scores.get(fk, True))
+        for vk, fk in _DETECTION_VALIDITY_KEYS.items()
+    }
+    localisation_rows, _ = _metric_rows(_LOCALISATION_METRICS, scores, accent)
+    detection_rows, any_invalid = _metric_rows(_DETECTION_METRICS, scores, accent, validity_map)
+
+    achieved = float(scores.get("doc_tpr90_achieved_tpr", 0.9))
+    footnote = (
+        f"<p class='n-note'>† TPR ≥ 0.90 not reachable — "
+        f"shown at max achievable TPR ({achieved:.2f}).</p>"
+        if any_invalid else ""
+    )
 
     return f"""
 <div class="section">
@@ -580,6 +620,7 @@ def _tier_section(tier: str, scores: dict[str, Any]) -> str:
     </tbody>
   </table>
   <p class="n-note">n = {n} evaluated samples</p>
+  {footnote}
 </div>"""
 
 
@@ -659,12 +700,18 @@ def _merged_tier_table(tier_scores: dict[str, Any]) -> str:
 
     def _tier_cell(val_key: str, ci_key: str, tier: str) -> str:
         s = tier_scores[tier]
-        val = float(s[val_key])
-        lo, hi = _as_ci(s[ci_key])
+        raw = s.get(val_key)
+        if raw is None:
+            return "<td class='mtt-cell'><span class='mtt-val'>—</span></td>"
+        val = float(raw)
+        ci_raw = s.get(ci_key)
+        lo, hi = _as_ci(ci_raw) if ci_raw is not None else (val, val)
         tag_label, tag_cls = _ci_tag(lo, hi)
+        valid = bool(s.get(_DETECTION_VALIDITY_KEYS.get(val_key, ""), True))
+        val_display = _f(val) + ("" if valid else " †")
         return (
             f"<td class='mtt-cell'>"
-            f"<span class='mtt-val'>{_f(val)}</span>"
+            f"<span class='mtt-val'>{val_display}</span>"
             f"<span class='mtt-ci'>[{_f(lo, 3)}, {_f(hi, 3)}]</span>"
             f"<span class='ci-tag {tag_cls}'>{tag_label}</span>"
             f"</td>"
@@ -772,7 +819,10 @@ def _multi_chart(
     """
     def _v(tier: str, key: str) -> str:
         s = tier_scores.get(tier)
-        return "null" if s is None else str(round(float(s[key]), 6))
+        if s is None:
+            return "null"
+        v = s.get(key)
+        return "null" if v is None else str(round(float(v), 6))
 
     labels_js = json.dumps(["C0", "C2", "C4"])
 
@@ -851,6 +901,12 @@ def _trend_remark(
             "Needs both C0 and C4 to assess the trend.</p>"
         )
 
+    if c0.get(val_key) is None or c4.get(val_key) is None:
+        return (
+            '<p class="chart-remark neutral">'
+            '<span class="remark-arrow">–</span>'
+            "Metric not available in this result set.</p>"
+        )
     v0 = float(c0[val_key])
     v4 = float(c4[val_key])
     delta = v4 - v0
@@ -905,8 +961,6 @@ def _detection_chart_card(
 
 
 def _degradation_charts(tier_scores: dict[str, Any]) -> str:
-    # Detection: Doc-AUC | Doc-F1 (row 1), FPR full-width (row 2)  — 2-col grid.
-    # Localisation: Region-P | Region-R | Region-F1 — 3-col single row.
     detection_charts = [
         _detection_chart_card("Doc-AUC", "detAucChart", "doc_auc", "#3b82f6", True,  "fixed", tier_scores),
         _detection_chart_card("Doc-F1",  "detF1Chart",  "doc_f1",  "#8b5cf6", True,  "fixed", tier_scores),
@@ -916,12 +970,20 @@ def _degradation_charts(tier_scores: dict[str, Any]) -> str:
     detection_js = "\n".join(js for _, js in detection_charts)
 
     localisation_charts = [
-        _detection_chart_card("Region Precision", "locPChart", "region_precision", "#06b6d4", True, "auto", tier_scores),
-        _detection_chart_card("Region Recall",    "locRChart", "region_recall",    "#f59e0b", True, "auto", tier_scores),
-        _detection_chart_card("Region F1",        "locF1Chart","region_f1",        "#10b981", True, "auto", tier_scores),
+        _detection_chart_card("Region Precision", "locPChart",  "region_precision", "#06b6d4", True, "auto", tier_scores),
+        _detection_chart_card("Region Recall",    "locRChart",  "region_recall",    "#f59e0b", True, "auto", tier_scores),
+        _detection_chart_card("Region F1",        "locF1Chart", "region_f1",        "#10b981", True, "auto", tier_scores),
     ]
     localisation_cards_html = "\n".join(html for html, _ in localisation_charts)
     localisation_js = "\n".join(js for _, js in localisation_charts)
+
+    tprf_charts = [
+        _detection_chart_card("Doc AUPRC",    "detAuprcChart",  "doc_auprc",        "#0ea5e9", True,  "fixed", tier_scores),
+        _detection_chart_card("FPR @ TPR=90", "detFprT90Chart", "doc_fpr_at_tpr90", "#f43f5e", False, "auto",  tier_scores),
+        _detection_chart_card("F1 @ TPR=90",  "detF1T90Chart",  "doc_f1_at_tpr90",  "#a855f7", True,  "fixed", tier_scores),
+    ]
+    tprf_cards_html = "\n".join(html for html, _ in tprf_charts)
+    tprf_js = "\n".join(js for _, js in tprf_charts)
 
     return f"""
 <div class="section" style="padding:0.75rem 2rem">
@@ -945,8 +1007,15 @@ def _degradation_charts(tier_scores: dict[str, Any]) -> str:
 <div class="charts-row-3">
 {detection_cards_html}
 </div>
+<div class="section" style="padding:0 2rem 0.25rem">
+  <h3 style="font-size:0.82rem;font-weight:700;color:#374151;margin:0">Threshold-Free &amp; Anchored Detection Metrics</h3>
+</div>
+<div class="charts-row-3">
+{tprf_cards_html}
+</div>
 {localisation_js}
-{detection_js}"""
+{detection_js}
+{tprf_js}"""
 
 
 _GH_URL   = "https://github.com/Kriyam-ai/kriyam-tamperflow"
@@ -1515,12 +1584,15 @@ def _v2_tier_breakdown(tier_scores: dict[str, Any]) -> str:
     _ACCENT = {"C0": "#16a34a", "C2": "#d97706", "C4": "#dc2626"}
     # (val_key, ci_key, display_name)
     _METRIC_KEYS = [
-        ("region_precision", "region_precision_ci", "Region-P"),
-        ("region_recall",    "region_recall_ci",    "Region-R"),
-        ("region_f1",        "region_f1_ci",        "Region-F1"),
-        ("doc_auc",          "doc_auc_ci",           "Doc-AUC"),
-        ("doc_f1",           "doc_f1_ci",            "Doc-F1"),
-        ("doc_fpr",          "doc_fpr_ci",           "FPR"),
+        ("region_precision",  "region_precision_ci",  "Region-P"),
+        ("region_recall",     "region_recall_ci",     "Region-R"),
+        ("region_f1",         "region_f1_ci",         "Region-F1"),
+        ("doc_auc",           "doc_auc_ci",           "Doc-AUC"),
+        ("doc_auprc",         "doc_auprc_ci",         "Doc-AUPRC"),
+        ("doc_f1",            "doc_f1_ci",            "Doc-F1"),
+        ("doc_fpr",           "doc_fpr_ci",           "FPR"),
+        ("doc_fpr_at_tpr90",  "doc_fpr_at_tpr90_ci",  "FPR@90"),
+        ("doc_f1_at_tpr90",   "doc_f1_at_tpr90_ci",   "F1@90"),
     ]
 
     cards: list[str] = []
@@ -1534,15 +1606,21 @@ def _v2_tier_breakdown(tier_scores: dict[str, Any]) -> str:
 
         rows_html = ""
         for val_key, ci_key, name in _METRIC_KEYS:
-            val = _f(float(s[val_key]))
-            lo, hi = _as_ci(s[ci_key])
+            raw = s.get(val_key)
+            if raw is None:
+                continue
+            val = _f(float(raw))
+            ci_raw = s.get(ci_key)
+            lo, hi = _as_ci(ci_raw) if ci_raw is not None else (float(raw), float(raw))
             tag_label, tag_cls = _ci_tag(lo, hi)
             ci_range = f"[{_f(lo, 3)}, {_f(hi, 3)}]"
+            valid = bool(s.get(_DETECTION_VALIDITY_KEYS.get(val_key, ""), True))
+            val_display = val + ("" if valid else " †")
             rows_html += (
                 f"<div class='v2-mrow' title='95% CI: {ci_range}'>"
                 f"<span class='v2-mrow-name'>{name}</span>"
                 f"<span class='v2-mrow-val'>"
-                f"{val}&nbsp;<span class='ci-tag {tag_cls}'>{tag_label}</span>"
+                f"{val_display}&nbsp;<span class='ci-tag {tag_cls}'>{tag_label}</span>"
                 f"</span>"
                 f"</div>"
             )
@@ -1614,9 +1692,12 @@ def _v2_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
         ("region_f1",        "Region-F1", "#10b981"),
     ]
     det_series = [
-        ("doc_auc", "Doc-AUC", "#3b82f6"),
-        ("doc_f1",  "Doc-F1",  "#8b5cf6"),
-        ("doc_fpr", "FPR",     "#f97316"),
+        ("doc_auc",          "Doc-AUC",    "#3b82f6"),
+        ("doc_auprc",        "Doc-AUPRC",  "#0ea5e9"),
+        ("doc_f1",           "Doc-F1",     "#8b5cf6"),
+        ("doc_fpr",          "FPR",        "#f97316"),
+        ("doc_fpr_at_tpr90", "FPR@TPR=90", "#f43f5e"),
+        ("doc_f1_at_tpr90",  "F1@TPR=90",  "#a855f7"),
     ]
 
     loc_chart = _v2_chart_section(
@@ -1629,7 +1710,7 @@ def _v2_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
         "Detection Metrics across Compression Tiers",
         "v2DetChart", det_series, tier_scores,
         y_scale="fixed",
-        note="Note: lower FPR is better; Doc-AUC and Doc-F1 higher is better.",
+        note="Lower FPR and FPR@TPR=90 is better; all others higher is better.",
     )
 
     total_n = sum(
@@ -1966,12 +2047,15 @@ def _v3_abstract(model_name: str, tier_scores: dict[str, Any], document_threshol
 def _v3_results_table(tier_scores: dict[str, Any]) -> str:
     """Booktabs-style per-tier results table."""
     cols: list[tuple[str, str, str]] = [
-        ("region_precision", "region_precision_ci", "Reg-P"),
-        ("region_recall",    "region_recall_ci",    "Reg-R"),
-        ("region_f1",        "region_f1_ci",        "Reg-F1"),
-        ("doc_auc",          "doc_auc_ci",           "Doc-AUC"),
-        ("doc_f1",           "doc_f1_ci",            "Doc-F1"),
-        ("doc_fpr",          "doc_fpr_ci",           "FPR ↓"),
+        ("region_precision",  "region_precision_ci",  "Reg-P"),
+        ("region_recall",     "region_recall_ci",     "Reg-R"),
+        ("region_f1",         "region_f1_ci",         "Reg-F1"),
+        ("doc_auc",           "doc_auc_ci",           "Doc-AUC"),
+        ("doc_auprc",         "doc_auprc_ci",         "AUPRC"),
+        ("doc_f1",            "doc_f1_ci",            "Doc-F1"),
+        ("doc_fpr",           "doc_fpr_ci",           "FPR ↓"),
+        ("doc_fpr_at_tpr90",  "doc_fpr_at_tpr90_ci",  "FPR@90 ↓"),
+        ("doc_f1_at_tpr90",   "doc_f1_at_tpr90_ci",   "F1@90"),
     ]
     header_cells = "<th>Tier</th>" + "".join(f"<th>{lbl}</th>" for _, _, lbl in cols)
 
@@ -1986,10 +2070,17 @@ def _v3_results_table(tier_scores: dict[str, Any]) -> str:
             f"<span class='tbl-ci'>n&nbsp;=&nbsp;{int(s['n_samples'])}</span></td>"
         ]
         for val_key, ci_key, _ in cols:
-            val = _f(float(s[val_key]))
-            lo, hi = _as_ci(s[ci_key])
+            raw = s.get(val_key)
+            if raw is None:
+                cells.append("<td><span class='tbl-val'>—</span></td>")
+                continue
+            val = _f(float(raw))
+            ci_raw = s.get(ci_key)
+            lo, hi = _as_ci(ci_raw) if ci_raw is not None else (float(raw), float(raw))
+            valid = bool(s.get(_DETECTION_VALIDITY_KEYS.get(val_key, ""), True))
+            val_display = val + ("" if valid else " †")
             cells.append(
-                f"<td><span class='tbl-val'>{val}</span>"
+                f"<td><span class='tbl-val'>{val_display}</span>"
                 f"<span class='tbl-ci'>[{_f(lo, 3)},&thinsp;{_f(hi, 3)}]</span></td>"
             )
         rows.append(f"<tr{row_cls}>{''.join(cells)}</tr>")
@@ -2003,7 +2094,8 @@ def _v3_results_table(tier_scores: dict[str, Any]) -> str:
 </div>
 <p class="v3-tbl-note"><strong>Table 1.</strong> Per-tier evaluation results.
 Values shown as point estimate with 95% bootstrap CI [lo,&thinsp;hi] (1,000 resamples) in grey below.
-FPR&nbsp;↓&nbsp;lower is better; all other metrics higher is better.
+FPR ↓ and FPR@90 ↓ lower is better; all other metrics higher is better.
+† TPR ≥ 0.90 not reachable — shown at max achievable TPR.
 Compression Robustness is reported separately in Section&nbsp;3.</p>"""
 
 
@@ -2144,9 +2236,12 @@ def _v3_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
     total_n = sum(int(tier_scores[t]["n_samples"]) for t in _ALL_TIERS if t in tier_scores)
 
     det_series = [
-        ("doc_auc", "Doc-AUC", "#1d4ed8"),
-        ("doc_f1",  "Doc-F1",  "#6d28d9"),
-        ("doc_fpr", "FPR",     "#b91c1c"),
+        ("doc_auc",          "Doc-AUC",    "#1d4ed8"),
+        ("doc_auprc",        "AUPRC",      "#0369a1"),
+        ("doc_f1",           "Doc-F1",     "#6d28d9"),
+        ("doc_fpr",          "FPR",        "#b91c1c"),
+        ("doc_fpr_at_tpr90", "FPR@TPR=90", "#be123c"),
+        ("doc_f1_at_tpr90",  "F1@TPR=90",  "#7e22ce"),
     ]
     loc_series = [
         ("region_precision", "Region-P",  "#0e7490"),
@@ -2157,9 +2252,9 @@ def _v3_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
     det_fig = _v3_figure_chart(
         "v3DetChart", 1,
         "Detection Metrics",
-        "Doc-AUC, Doc-F1, and FPR across compression tiers "
+        "Doc-AUC, AUPRC, Doc-F1, FPR, FPR@TPR=90, and F1@TPR=90 across compression tiers "
         "C0&thinsp;→&thinsp;C2&thinsp;→&thinsp;C4. "
-        "Doc-AUC and Doc-F1 higher is better; FPR lower is better.",
+        "FPR and FPR@TPR=90 lower is better; all others higher is better.",
         det_series, tier_scores, y_scale="fixed",
     )
     loc_fig = _v3_figure_chart(
