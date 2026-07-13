@@ -190,68 +190,6 @@ def _bootstrap_ci(
     return lower, upper
 
 
-def _doc_metrics_bootstrap(
-    confidences: np.ndarray,
-    gt_labels: np.ndarray,
-    pred_labels: np.ndarray,
-    n: int = 1000,
-    ci: float = 0.95,
-    rng: np.random.Generator | None = None,
-) -> dict[str, tuple[float, float]]:
-    """Bootstrap CIs for doc_auc, doc_f1, and doc_fpr.
-
-    Resamples the full dataset with replacement each iteration and recomputes
-    the complete metric — the only statistically valid approach for metrics
-    that are nonlinear functions of the sample (AUC, F1, FPR).
-
-    Doc-F1 and FPR are derived directly from the binary *pred_labels*; no
-    threshold search is performed inside the bootstrap loop.
-    """
-    if rng is None:
-        rng = np.random.default_rng(seed=42)
-
-    n_samples = len(confidences)
-    auc_boot: list[float] = []
-    f1_boot: list[float] = []
-    fpr_boot: list[float] = []
-
-    for _ in range(n):
-        idx = rng.choice(n_samples, size=n_samples, replace=True)
-        c_b = confidences[idx]
-        g_b = gt_labels[idx]
-        p_b = pred_labels[idx]
-
-        # AUC — fall back to 0.5 when only one class survives the resample.
-        if len(np.unique(g_b)) >= 2:
-            auc_boot.append(float(roc_auc_score(g_b, c_b)))
-        else:
-            auc_boot.append(0.5)
-
-        # Doc-F1 from binary labels.
-        tp_b = int(((p_b == 1) & (g_b == 1)).sum())
-        fp_b = int(((p_b == 1) & (g_b == 0)).sum())
-        fn_b = int(((p_b == 0) & (g_b == 1)).sum())
-        pr_b = tp_b / (tp_b + fp_b) if (tp_b + fp_b) > 0 else 0.0
-        rc_b = tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0.0
-        f1_boot.append(2 * pr_b * rc_b / (pr_b + rc_b) if (pr_b + rc_b) > 0 else 0.0)
-
-        # FPR = FP / (FP + TN) from binary labels.
-        tn_b = int(((p_b == 0) & (g_b == 0)).sum())
-        fpr_boot.append(fp_b / (fp_b + tn_b) if (fp_b + tn_b) > 0 else 0.0)
-
-    alpha = (1.0 - ci) / 2.0
-
-    def _pct(arr: list[float]) -> tuple[float, float]:
-        a = np.array(arr)
-        return float(np.quantile(a, alpha)), float(np.quantile(a, 1.0 - alpha))
-
-    return {
-        "auc_ci": _pct(auc_boot),
-        "f1_ci": _pct(f1_boot),
-        "fpr_ci": _pct(fpr_boot),
-    }
-
-
 def _operating_point_at_tpr(
     gt_labels: np.ndarray,
     confidences: np.ndarray,
@@ -273,13 +211,13 @@ def _operating_point_at_tpr(
         target_tpr: TPR level to target (default 0.9 for FPR@TPR90).
 
     Returns:
-        Dict with keys ``threshold``, ``achieved_tpr``, ``fpr``, ``f1``, ``valid``.
+        Dict with keys ``threshold``, ``achieved_tpr``, ``fpr``, and ``valid``.
         ``valid`` is True iff ``achieved_tpr >= target_tpr``.
         When fewer than two classes are present, returns all-zero values with
         ``valid = False``.
     """
     if len(np.unique(gt_labels)) < 2:
-        return {"threshold": 0.0, "achieved_tpr": 0.0, "fpr": 0.0, "f1": 0.0, "valid": False}
+        return {"threshold": 0.0, "achieved_tpr": 0.0, "fpr": 0.0, "valid": False}
 
     fpr_arr, tpr_arr, thresh_arr = roc_curve(gt_labels, confidences)
 
@@ -291,23 +229,10 @@ def _operating_point_at_tpr(
         idx = int(idxs[0])
         valid = True
 
-    achieved_tpr = float(tpr_arr[idx])
-    fpr_val = float(fpr_arr[idx])
-    threshold = float(thresh_arr[idx])
-
-    pred_at_t = (confidences >= threshold).astype(int)
-    tp = int(((pred_at_t == 1) & (gt_labels == 1)).sum())
-    fp = int(((pred_at_t == 1) & (gt_labels == 0)).sum())
-    fn = int(((pred_at_t == 0) & (gt_labels == 1)).sum())
-    pr = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    rc = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * pr * rc / (pr + rc) if (pr + rc) > 0 else 0.0
-
     return {
-        "threshold": threshold,
-        "achieved_tpr": achieved_tpr,
-        "fpr": fpr_val,
-        "f1": f1,
+        "threshold": float(thresh_arr[idx]),
+        "achieved_tpr": float(tpr_arr[idx]),
+        "fpr": float(fpr_arr[idx]),
         "valid": valid,
     }
 
@@ -315,24 +240,25 @@ def _operating_point_at_tpr(
 def _operating_point_bootstrap(
     confidences: np.ndarray,
     gt_labels: np.ndarray,
-    target_tpr: float = 0.9,
+    tpr_targets: tuple[float, ...] = (0.8, 0.85, 0.9),
     n: int = 1000,
     ci: float = 0.95,
     rng: np.random.Generator | None = None,
 ) -> dict[str, tuple[float, float]]:
-    """Bootstrap CIs for doc_auprc, fpr_at_tpr90, and f1_at_tpr90.
+    """Bootstrap CIs for doc_auc, doc_auprc, and FPR at each TPR target.
 
-    Mirrors the structure of :func:`_doc_metrics_bootstrap`.  Resamples the
-    full dataset with replacement each iteration and recomputes each metric
-    from scratch — the statistically valid approach for nonlinear metrics.
+    A single bootstrap loop computes all metrics simultaneously to avoid
+    re-sampling the dataset once per metric.  Resamples the full dataset with
+    replacement each iteration — the statistically valid approach for nonlinear
+    metrics such as AUC, AUPRC, and FPR@TPR.
     """
     if rng is None:
         rng = np.random.default_rng(seed=42)
 
     n_samples = len(confidences)
+    auc_boot: list[float] = []
     auprc_boot: list[float] = []
-    fpr_boot: list[float] = []
-    f1_boot: list[float] = []
+    fpr_boots: dict[float, list[float]] = {t: [] for t in tpr_targets}
 
     for _ in range(n):
         idx = rng.choice(n_samples, size=n_samples, replace=True)
@@ -340,15 +266,17 @@ def _operating_point_bootstrap(
         g_b = gt_labels[idx]
 
         if len(np.unique(g_b)) < 2:
+            auc_boot.append(0.5)
             auprc_boot.append(float(g_b.mean()))
-            fpr_boot.append(0.0)
-            f1_boot.append(0.0)
+            for t in tpr_targets:
+                fpr_boots[t].append(0.0)
             continue
 
+        auc_boot.append(float(roc_auc_score(g_b, c_b)))
         auprc_boot.append(float(average_precision_score(g_b, c_b)))
-        op = _operating_point_at_tpr(g_b, c_b, target_tpr)
-        fpr_boot.append(op["fpr"])
-        f1_boot.append(op["f1"])
+        for t in tpr_targets:
+            op = _operating_point_at_tpr(g_b, c_b, t)
+            fpr_boots[t].append(op["fpr"])
 
     alpha = (1.0 - ci) / 2.0
 
@@ -356,11 +284,13 @@ def _operating_point_bootstrap(
         a = np.array(arr)
         return float(np.quantile(a, alpha)), float(np.quantile(a, 1.0 - alpha))
 
-    return {
+    result: dict[str, tuple[float, float]] = {
+        "auc_ci": _pct(auc_boot),
         "auprc_ci": _pct(auprc_boot),
-        "fpr_at_tpr90_ci": _pct(fpr_boot),
-        "f1_at_tpr90_ci": _pct(f1_boot),
     }
+    for t in tpr_targets:
+        result[f"fpr_at_tpr{int(t * 100)}_ci"] = _pct(fpr_boots[t])
+    return result
 
 
 def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -368,12 +298,11 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
 
     Each element of *results* must contain the keys returned by
     :func:`match_regions` (``region_precision``, ``region_recall``,
-    ``region_f1``) plus ``gt_label`` (int, 1=tampered/0=authentic),
-    ``pred_label`` (int, 1=tampered/0=authentic derived from predicted regions),
-    and ``pred_confidence`` (float, max region confidence or 0.0 if no regions).
+    ``region_f1``) plus ``gt_label`` (int, 1=tampered/0=authentic) and
+    ``pred_confidence`` (float, max region confidence or 0.0 if no regions).
 
-    Document-level AUC-ROC is computed with ``sklearn.metrics.roc_auc_score``
-    over all samples.  All other metrics are macro-averaged (simple mean across
+    Document-level AUC-ROC and AUPRC are computed with ``sklearn.metrics`` over
+    all samples.  All other metrics are macro-averaged (simple mean across
     images).  Bootstrap 95 % confidence intervals (n=1 000) are reported for
     every scalar metric.
 
@@ -389,11 +318,12 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
         - ``region_f1``        / ``region_f1_ci``
         - ``doc_auc``               / ``doc_auc_ci``
         - ``doc_auprc``             / ``doc_auprc_ci``
-        - ``doc_f1``                / ``doc_f1_ci``
-        - ``doc_fpr``               / ``doc_fpr_ci``
+        - ``doc_fpr_at_tpr80``      / ``doc_fpr_at_tpr80_ci`` / ``doc_fpr_at_tpr80_valid``
+        - ``doc_tpr80_achieved_tpr`` (float — actual TPR reached; equals target when valid)
+        - ``doc_fpr_at_tpr85``      / ``doc_fpr_at_tpr85_ci`` / ``doc_fpr_at_tpr85_valid``
+        - ``doc_tpr85_achieved_tpr``
         - ``doc_fpr_at_tpr90``      / ``doc_fpr_at_tpr90_ci`` / ``doc_fpr_at_tpr90_valid``
-        - ``doc_f1_at_tpr90``       / ``doc_f1_at_tpr90_ci``  / ``doc_f1_at_tpr90_valid``
-        - ``doc_tpr90_achieved_tpr`` (float — actual TPR reached; equals target when valid)
+        - ``doc_tpr90_achieved_tpr``
         - ``n_samples`` (int)
 
     Raises:
@@ -410,33 +340,22 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
 
     confidences = np.array([r["pred_confidence"] for r in results], dtype=np.float64)
     gt_labels = np.array([r["gt_label"] for r in results], dtype=np.int32)
-    pred_labels = np.array([r["pred_label"] for r in results], dtype=np.int32)
 
-    # Document-level AUC uses pred_confidence (max region confidence or 0.0).
-    # Falls back to 0.5 when only one class is present (degenerate subset).
+    # Document-level AUC and AUPRC use pred_confidence (max region confidence or 0.0).
+    # Both fall back to degenerate values when only one class is present.
     n_classes = len(np.unique(gt_labels))
     doc_auc = float(roc_auc_score(gt_labels, confidences)) if n_classes >= 2 else 0.5
-
-    # Doc-F1 and FPR from binary pred_labels — no threshold search.
-    # pred_label is 1 if the model predicted any tampered regions, 0 otherwise.
-    tp = int(((pred_labels == 1) & (gt_labels == 1)).sum())
-    fp = int(((pred_labels == 1) & (gt_labels == 0)).sum())
-    fn = int(((pred_labels == 0) & (gt_labels == 1)).sum())
-    tn = int(((pred_labels == 0) & (gt_labels == 0)).sum())
-    doc_prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    doc_rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    doc_f1  = 2 * doc_prec * doc_rec / (doc_prec + doc_rec) if (doc_prec + doc_rec) > 0 else 0.0
-    doc_fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-
     doc_auprc = (
         float(average_precision_score(gt_labels, confidences))
         if n_classes >= 2
         else float(gt_labels.mean())
     )
 
-    op = _operating_point_at_tpr(gt_labels, confidences)
-    doc_cis = _doc_metrics_bootstrap(confidences, gt_labels, pred_labels, rng=rng)
-    op_cis = _operating_point_bootstrap(confidences, gt_labels, rng=rng)
+    op80 = _operating_point_at_tpr(gt_labels, confidences, 0.8)
+    op85 = _operating_point_at_tpr(gt_labels, confidences, 0.85)
+    op90 = _operating_point_at_tpr(gt_labels, confidences, 0.9)
+
+    boot = _operating_point_bootstrap(confidences, gt_labels, rng=rng)
 
     return {
         "region_precision": float(prec.mean()),
@@ -446,20 +365,21 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
         "region_f1": float(f1.mean()),
         "region_f1_ci": _bootstrap_ci(f1, rng=rng),
         "doc_auc": doc_auc,
-        "doc_auc_ci": doc_cis["auc_ci"],
+        "doc_auc_ci": boot["auc_ci"],
         "doc_auprc": doc_auprc,
-        "doc_auprc_ci": op_cis["auprc_ci"],
-        "doc_f1": doc_f1,
-        "doc_f1_ci": doc_cis["f1_ci"],
-        "doc_fpr": doc_fpr,
-        "doc_fpr_ci": doc_cis["fpr_ci"],
-        "doc_fpr_at_tpr90": op["fpr"],
-        "doc_fpr_at_tpr90_ci": op_cis["fpr_at_tpr90_ci"],
-        "doc_fpr_at_tpr90_valid": op["valid"],
-        "doc_f1_at_tpr90": op["f1"],
-        "doc_f1_at_tpr90_ci": op_cis["f1_at_tpr90_ci"],
-        "doc_f1_at_tpr90_valid": op["valid"],
-        "doc_tpr90_achieved_tpr": op["achieved_tpr"],
+        "doc_auprc_ci": boot["auprc_ci"],
+        "doc_fpr_at_tpr80": op80["fpr"],
+        "doc_fpr_at_tpr80_ci": boot["fpr_at_tpr80_ci"],
+        "doc_fpr_at_tpr80_valid": op80["valid"],
+        "doc_tpr80_achieved_tpr": op80["achieved_tpr"],
+        "doc_fpr_at_tpr85": op85["fpr"],
+        "doc_fpr_at_tpr85_ci": boot["fpr_at_tpr85_ci"],
+        "doc_fpr_at_tpr85_valid": op85["valid"],
+        "doc_tpr85_achieved_tpr": op85["achieved_tpr"],
+        "doc_fpr_at_tpr90": op90["fpr"],
+        "doc_fpr_at_tpr90_ci": boot["fpr_at_tpr90_ci"],
+        "doc_fpr_at_tpr90_valid": op90["valid"],
+        "doc_tpr90_achieved_tpr": op90["achieved_tpr"],
         "n_samples": len(results),
     }
 
@@ -469,22 +389,34 @@ def aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def compression_robustness(auc_c0: float, auc_c4: float) -> float:
+def compression_robustness(
+    c0: float,
+    c4: float,
+    min_c0: float = 0.5,
+    metric_name: str = "metric",
+) -> float | None:
     """Compute the Compression Robustness (CR) score.
 
-    CR = 1 − (AUC_C0 − AUC_C4) / AUC_C0
+    CR = c4 / c0 (clamped to 1.0).  Returns ``None`` when ``c0 < min_c0``,
+    indicating that C0 performance is too low to serve as a meaningful baseline
+    for robustness measurement.
 
-    A CR of 1.0 means the model loses nothing across compression tiers.  Lower
-    values indicate greater sensitivity to JPEG re-compression artefacts.
+    The ``min_c0`` floor should be set to a metric-specific lower bound:
+
+    - AUC: ``0.5`` (random baseline)
+    - AUPRC: ``≈ 0.667`` (positive-class prior for this benchmark's 700/350 split)
+    - Region-F1: ``0.05`` (very weak localisation still yields non-trivial CR)
 
     Args:
-        auc_c0: AUC-ROC on the pristine (C0) tier.
-        auc_c4: AUC-ROC on the heavy-photocopy (C4) tier.
+        c0: Metric value on the pristine (C0) tier.
+        c4: Metric value on the heavy-photocopy (C4) tier.
+        min_c0: Minimum acceptable C0 value below which ``None`` is returned.
+            Defaults to ``0.5``.
+        metric_name: Human-readable metric name (used in documentation only).
 
     Returns:
-        The CR score as a float.  Returns ``1.0`` when ``auc_c0`` is zero to
-        avoid division by zero (a model with 0 AUC at C0 has no signal to lose).
+        CR score as a float in [0, 1], or ``None`` when ``c0 < min_c0``.
     """
-    if auc_c0 == 0.0:
-        return 1.0
-    return min(1.0, 1.0 - (auc_c0 - auc_c4) / auc_c0)
+    if c0 < min_c0:
+        return None
+    return min(1.0, c4 / c0)

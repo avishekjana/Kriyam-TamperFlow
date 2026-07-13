@@ -36,7 +36,6 @@ from kriyam.metrics import aggregate, match_regions
 _LOG = logging.getLogger("kriyam.evaluate")
 
 _ALL_TIERS = ("C0", "C2", "C4")
-DOCUMENT_THRESHOLD: float = 0.5
 IOU_THRESHOLD: float = 0.1
 
 
@@ -75,17 +74,13 @@ def _score_sample(
     sample: dict[str, Any],
     pred: dict[str, Any],
     tier: str,
-    document_threshold: float = DOCUMENT_THRESHOLD,
     iou_threshold: float = IOU_THRESHOLD,
 ) -> dict[str, Any]:
     """Produce a flat result dict for one (sample, tier) pair.
 
     Document-level prediction is derived from the predicted regions:
     - ``pred_confidence`` = max region confidence, or 0.0 if no regions.
-    - ``pred_label`` = 1 if ``pred_confidence >= document_threshold`` else 0.
 
-    Using a fixed threshold ensures every model is evaluated at the same
-    operating point, making Doc-F1 and FPR directly comparable across models.
     Top-level ``confidence`` and ``is_authentic`` fields in the prediction JSON
     are ignored; region ``confidence`` is the only source of truth.
 
@@ -93,7 +88,6 @@ def _score_sample(
         sample: Parsed annotation dict from :func:`load_dataset`.
         pred: Parsed prediction dict from the model's output folder.
         tier: Compression tier string (e.g. ``"C0"``).
-        document_threshold: Confidence threshold for binary document prediction.
         iou_threshold: Minimum IoU for a region pair to count as a TP.
 
     Returns:
@@ -106,7 +100,6 @@ def _score_sample(
         if pred_regions
         else 0.0
     )
-    pred_label = int(pred_confidence >= document_threshold)
 
     gt_label = 0 if sample["is_authentic"] else 1
 
@@ -122,7 +115,6 @@ def _score_sample(
         "sample_id": sample["id"],
         "tier": tier,
         "gt_label": gt_label,
-        "pred_label": pred_label,
         "pred_confidence": pred_confidence,
         **region_result,
     }
@@ -154,8 +146,9 @@ def _print_tier_table(tier: str, scores: dict[str, Any]) -> None:
     print(header_row)
     print(separator)
 
+    tpr80_valid = bool(scores.get("doc_fpr_at_tpr80_valid", True))
+    tpr85_valid = bool(scores.get("doc_fpr_at_tpr85_valid", True))
     tpr90_valid = bool(scores.get("doc_fpr_at_tpr90_valid", True))
-    tpr90_achieved = float(scores.get("doc_tpr90_achieved_tpr", 0.9))
 
     rows: list[tuple[str, float, tuple[float, float], bool]] = [
         ("Region Precision", scores["region_precision"], scores["region_precision_ci"], True),
@@ -163,10 +156,9 @@ def _print_tier_table(tier: str, scores: dict[str, Any]) -> None:
         ("Region F1",        scores["region_f1"],        scores["region_f1_ci"],        True),
         ("Doc AUC-ROC",      scores["doc_auc"],          scores["doc_auc_ci"],          True),
         ("Doc AUPRC",        scores["doc_auprc"],        scores["doc_auprc_ci"],        True),
-        ("Doc F1",           scores["doc_f1"],           scores["doc_f1_ci"],           True),
-        ("FPR",              scores["doc_fpr"],          scores["doc_fpr_ci"],          True),
+        ("FPR @ TPR=80",     scores["doc_fpr_at_tpr80"], scores["doc_fpr_at_tpr80_ci"], tpr80_valid),
+        ("FPR @ TPR=85",     scores["doc_fpr_at_tpr85"], scores["doc_fpr_at_tpr85_ci"], tpr85_valid),
         ("FPR @ TPR=90",     scores["doc_fpr_at_tpr90"], scores["doc_fpr_at_tpr90_ci"], tpr90_valid),
-        ("F1 @ TPR=90",      scores["doc_f1_at_tpr90"],  scores["doc_f1_at_tpr90_ci"],  tpr90_valid),
     ]
     any_invalid = False
     for name, value, ci, valid in rows:
@@ -189,7 +181,16 @@ def _print_tier_table(tier: str, scores: dict[str, Any]) -> None:
     print(separator)
     print(f"  n = {n} samples")
     if any_invalid:
-        print(f"  * TPR ≥ 0.90 not reachable — reported at max achievable TPR ({tpr90_achieved:.2f}).")
+        footnote_parts = []
+        for target_str, valid_flag, achieved_key in [
+            ("80", tpr80_valid, "doc_tpr80_achieved_tpr"),
+            ("85", tpr85_valid, "doc_tpr85_achieved_tpr"),
+            ("90", tpr90_valid, "doc_tpr90_achieved_tpr"),
+        ]:
+            if not valid_flag:
+                ach = float(scores.get(achieved_key, 0.0))
+                footnote_parts.append(f"TPR≥{target_str}%: max {ach:.2f}")
+        print(f"  * TPR target not reachable — {'; '.join(footnote_parts)}.")
 
 
 def _print_tables(tier_scores: dict[str, dict[str, Any]]) -> None:
@@ -203,7 +204,6 @@ def _write_scores(
     tier_scores: dict[str, dict[str, Any]],
     model_name: str,
     results_dir: Path,
-    document_threshold: float = DOCUMENT_THRESHOLD,
     iou_threshold: float = IOU_THRESHOLD,
 ) -> Path:
     """Serialise tier scores to ``results/<model_name>/scores.json``.
@@ -226,7 +226,6 @@ def _write_scores(
 
     payload = {
         "model": model_name,
-        "document_threshold": document_threshold,
         "iou_threshold": iou_threshold,
         "tiers": serialisable,
     }
@@ -242,8 +241,8 @@ def _write_raw_results(
     """Write per-image raw results to ``results/<model_name>/raw_results.jsonl``.
 
     Each line is a JSON object with the fields produced by ``_score_sample()``.
-    These raw results can be re-aggregated at any document threshold without
-    re-running the full evaluation — see ``scripts/report_from_cache.py``.
+    These raw results can be re-aggregated to regenerate reports without re-running
+    the full evaluation — see ``scripts/report_from_cache.py``.
 
     Returns:
         The path of the written file.
@@ -318,7 +317,6 @@ def run_evaluation(
     tiers: list[str],
     report_out: Path,
     hf_token: str | None = None,
-    document_threshold: float = DOCUMENT_THRESHOLD,
     iou_threshold: float = IOU_THRESHOLD,
     report_template: str = "v1",
     workers: int = 2,
@@ -363,8 +361,7 @@ def run_evaluation(
                         pbar.update(1)
                         continue
                     fut = executor.submit(
-                        _score_sample, sample, pred, tier,
-                        document_threshold, iou_threshold,
+                        _score_sample, sample, pred, tier, iou_threshold,
                     )
                     future_to_tier[fut] = tier
             for fut in as_completed(future_to_tier):
@@ -384,8 +381,8 @@ def run_evaluation(
         if authentic_in_results == 0:
             _LOG.warning(
                 "Tier %s: No authentic image predictions found (0 of %d authentic annotations). "
-                "FPR will be 0.0 and Doc-AUC will fall back to 0.5 (one-class). "
-                "Add prediction files for authentic images (with regions: []) to get valid FPR and Doc-AUC.",
+                "FPR@TPR metrics will be 0.0 and Doc-AUC will fall back to 0.5 (one-class). "
+                "Add prediction files for authentic images (with regions: []) to get valid metrics.",
                 tier,
                 sum(1 for s in samples if s["is_authentic"]),
             )
@@ -400,20 +397,15 @@ def run_evaluation(
     results_root = Path("results")
     scores_path = _write_scores(
         tier_scores, model_name, results_root,
-        document_threshold=document_threshold,
         iou_threshold=iou_threshold,
     )
     _LOG.info("Scores written to %s", scores_path)
     raw_path = _write_raw_results(tier_results, model_name, results_root)
-    _LOG.info(
-        "Raw per-image results written to %s "
-        "(use report_from_cache.py to re-report at a different document threshold)",
-        raw_path,
-    )
+    _LOG.info("Raw per-image results written to %s", raw_path)
 
     report_out.parent.mkdir(parents=True, exist_ok=True)
     report.generate(
-        scores={"model": model_name, "document_threshold": document_threshold, "tiers": tier_scores},
+        scores={"model": model_name, "tiers": tier_scores},
         output_path=str(report_out),
         template=report_template,
     )
@@ -470,24 +462,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--report-template",
-        choices=["v1", "v2", "v3"],
+        choices=["v1", "v2", "v3", "v5"],
         default="v1",
         metavar="TEMPLATE",
         help=(
             "Report template: v1 (default, card-based layout), v2 "
-            "(research-report style with full-width stacked charts), or v3 "
-            "(academic paper style — serif type, booktabs tables, figure captions)."
-        ),
-    )
-    parser.add_argument(
-        "--document-threshold",
-        type=float,
-        default=DOCUMENT_THRESHOLD,
-        metavar="FLOAT",
-        help=(
-            "Confidence threshold for binary document-level prediction. "
-            "pred_label=1 if max(region confidences) >= threshold. "
-            "Use the same value across all models for comparable Doc-F1 and FPR."
+            "(research-report style with full-width stacked charts), v3 "
+            "(academic paper style — serif type, booktabs tables, figure captions), "
+            "or v5 (compact dashboard — minimal whitespace)."
         ),
     )
     parser.add_argument(
@@ -532,7 +514,6 @@ def main(argv: list[str] | None = None) -> None:
         tiers=args.tiers,
         report_out=Path(args.report_out),
         hf_token=args.hf_token,
-        document_threshold=args.document_threshold,
         iou_threshold=args.iou_threshold,
         report_template=args.report_template,
         workers=args.workers,

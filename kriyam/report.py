@@ -33,16 +33,16 @@ _LOCALISATION_METRICS: list[tuple[str, str, str]] = [
 _DETECTION_METRICS: list[tuple[str, str, str]] = [
     ("doc_auc",           "doc_auc_ci",           "Document AUC-ROC (Doc-AUC)"),
     ("doc_auprc",         "doc_auprc_ci",         "Document AUPRC (Doc-AUPRC)"),
-    ("doc_f1",            "doc_f1_ci",            "Document F1 (Doc-F1)"),
-    ("doc_fpr",           "doc_fpr_ci",           "False Positive Rate (FPR)"),
+    ("doc_fpr_at_tpr80",  "doc_fpr_at_tpr80_ci",  "FPR @ TPR=80% (FPR@80)"),
+    ("doc_fpr_at_tpr85",  "doc_fpr_at_tpr85_ci",  "FPR @ TPR=85% (FPR@85)"),
     ("doc_fpr_at_tpr90",  "doc_fpr_at_tpr90_ci",  "FPR @ TPR=90% (FPR@90)"),
-    ("doc_f1_at_tpr90",   "doc_f1_at_tpr90_ci",   "F1 @ TPR=90% (F1@90)"),
 ]
 
 # Keys whose validity may be flagged False (metric not fully achievable).
 _DETECTION_VALIDITY_KEYS: dict[str, str] = {
+    "doc_fpr_at_tpr80": "doc_fpr_at_tpr80_valid",
+    "doc_fpr_at_tpr85": "doc_fpr_at_tpr85_valid",
     "doc_fpr_at_tpr90": "doc_fpr_at_tpr90_valid",
-    "doc_f1_at_tpr90":  "doc_f1_at_tpr90_valid",
 }
 
 _METRIC_HIGHER_IS_BETTER: dict[str, bool] = {
@@ -51,10 +51,9 @@ _METRIC_HIGHER_IS_BETTER: dict[str, bool] = {
     "region_f1":         True,
     "doc_auc":           True,
     "doc_auprc":         True,
-    "doc_f1":            True,
-    "doc_fpr":           False,
+    "doc_fpr_at_tpr80":  False,
+    "doc_fpr_at_tpr85":  False,
     "doc_fpr_at_tpr90":  False,
-    "doc_f1_at_tpr90":   True,
 }
 
 
@@ -204,11 +203,11 @@ tbody tr:hover td { background: #fafafa; }
 /* ── CR section ── */
 .cr-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
   margin-bottom: 1.25rem;
 }
-@media (max-width: 560px) { .cr-grid { grid-template-columns: 1fr; } }
+@media (max-width: 660px) { .cr-grid { grid-template-columns: 1fr; } }
 
 .cr-card {
   border: 1px solid #e5e7eb;
@@ -282,6 +281,13 @@ tbody tr:hover td { background: #fafafa; }
   margin-bottom: 1.25rem;
 }
 @media (max-width: 560px) { .charts-grid-3 { grid-template-columns: 1fr; } }
+.charts-row-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+@media (max-width: 560px) { .charts-row-2 { grid-template-columns: 1fr; } }
 .charts-row-3 {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -289,6 +295,14 @@ tbody tr:hover td { background: #fafafa; }
   margin-bottom: 1.25rem;
 }
 @media (max-width: 660px) { .charts-row-3 { grid-template-columns: 1fr; } }
+.charts-row-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+@media (max-width: 880px) { .charts-row-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 440px) { .charts-row-4 { grid-template-columns: 1fr; } }
 .span-full { grid-column: 1 / -1; }
 .hb-badge {
   font-size: 0.6rem;
@@ -473,14 +487,16 @@ def _ci_tag(lo: float, hi: float) -> tuple[str, str]:
     return "Less stable", "ci-wide"
 
 
-def _cr(c0: float, c4: float) -> float:
-    """CR = 1 − (val_C0 − val_C4) / val_C0; returns 1.0 when val_C0 == 0."""
-    if c0 == 0.0:
-        return 1.0
-    return min(1.0, 1.0 - (c0 - c4) / c0)
+def _cr(c0: float, c4: float, min_c0: float = 0.5) -> float | None:
+    """CR = c4/c0 clamped to 1.0; returns None when c0 < min_c0."""
+    if c0 < min_c0:
+        return None
+    return min(1.0, c4 / c0)
 
 
-def _cr_label(cr: float) -> str:
+def _cr_label(cr: float | None) -> str:
+    if cr is None:
+        return "N/A — C0 score below threshold"
     if cr >= 0.9:
         return "Excellent — almost no degradation"
     if cr >= 0.7:
@@ -490,8 +506,14 @@ def _cr_label(cr: float) -> str:
     return "Severe degradation — model heavily relies on compression artifacts"
 
 
-def _cr_remark(cr: float) -> str:
+def _cr_remark(cr: float | None) -> str:
     """Return a chart-remark block summarising the CR value."""
+    if cr is None:
+        return (
+            '<p class="chart-remark neutral">'
+            "C0 score is below the minimum threshold for CR to be meaningful — "
+            "the model performs near random at the pristine tier.</p>"
+        )
     if cr >= 0.9:
         cls  = "good"
         body = f"CR = {cr:.3f} — Strong robustness. Performance is nearly unaffected by aggressive JPEG re-compression."
@@ -510,15 +532,13 @@ def _cr_remark(cr: float) -> str:
 def _missing_authentic_warning(tier_scores: dict[str, Any]) -> str:
     """Return an HTML warning banner when authentic predictions are entirely absent.
 
-    Detected by doc_auc == 0.5 (one-class fallback) AND doc_fpr == 0.0 across
-    all scored tiers — this combination is otherwise statistically improbable.
+    Detected by doc_auc == 0.5 (one-class fallback) across all scored tiers.
     """
     scored = [s for s in tier_scores.values() if s]
     if not scored:
         return ""
     all_missing = all(
         abs(float(s.get("doc_auc", 1.0)) - 0.5) < 1e-6
-        and float(s.get("doc_fpr", 1.0)) == 0.0
         for s in scored
     )
     if not all_missing:
@@ -528,10 +548,10 @@ def _missing_authentic_warning(tier_scores: dict[str, Any]) -> str:
         'padding:0.65rem 0.9rem;margin:0.75rem 0 1rem;border-radius:0 4px 4px 0;'
         'font-size:8.5pt;font-family:Helvetica,Arial,sans-serif;color:#78350f">'
         "<strong>&#9888;&ensp;Missing authentic predictions</strong> &mdash; "
-        "FPR is 0.0 and Doc-AUC is 0.5 (one-class fallback) across all tiers, "
+        "Doc-AUC is 0.5 (one-class fallback) across all tiers, "
         "which indicates that no prediction files were found for authentic (non-tampered) images. "
         "Add a <code>regions: []</code> prediction file for every authentic image "
-        "so FPR and Doc-AUC can be computed correctly."
+        "so FPR@TPR metrics and Doc-AUC can be computed correctly."
         "</div>"
     )
 
@@ -588,11 +608,18 @@ def _tier_section(tier: str, scores: dict[str, Any]) -> str:
     localisation_rows, _ = _metric_rows(_LOCALISATION_METRICS, scores, accent)
     detection_rows, any_invalid = _metric_rows(_DETECTION_METRICS, scores, accent, validity_map)
 
-    achieved = float(scores.get("doc_tpr90_achieved_tpr", 0.9))
+    footnote_parts = []
+    for target_str, valid_key, achieved_key in [
+        ("80", "doc_fpr_at_tpr80_valid", "doc_tpr80_achieved_tpr"),
+        ("85", "doc_fpr_at_tpr85_valid", "doc_tpr85_achieved_tpr"),
+        ("90", "doc_fpr_at_tpr90_valid", "doc_tpr90_achieved_tpr"),
+    ]:
+        if not bool(scores.get(valid_key, True)):
+            ach = float(scores.get(achieved_key, 0.0))
+            footnote_parts.append(f"FPR@{target_str}%: max {ach:.2f}")
     footnote = (
-        f"<p class='n-note'>† TPR ≥ 0.90 not reachable — "
-        f"shown at max achievable TPR ({achieved:.2f}).</p>"
-        if any_invalid else ""
+        f"<p class='n-note'>† TPR target not reachable — {'; '.join(footnote_parts)}.</p>"
+        if footnote_parts else ""
     )
 
     return f"""
@@ -766,32 +793,39 @@ def _cr_section(tier_scores: dict[str, Any]) -> str:
     if c0 is None or c4 is None:
         return ""
 
-    cr_auc = _cr(float(c0["doc_auc"]), float(c4["doc_auc"]))
-    cr_f1  = _cr(float(c0["region_f1"]), float(c4["region_f1"]))
+    cr_auc   = _cr(float(c0["doc_auc"]),   float(c4["doc_auc"]))
+    cr_f1    = _cr(float(c0["region_f1"]), float(c4["region_f1"]), min_c0=0.05)
+    cr_auprc = _cr(float(c0["doc_auprc"]), float(c4["doc_auprc"]), min_c0=0.667)
+
+    def _card(cr: float | None, label: str, formula: str) -> str:
+        val_str = _f(cr, 3) if cr is not None else "N/A"
+        return (
+            f"<div class='cr-card'>"
+            f"<span class='cr-value'>{val_str}</span>"
+            f"<span class='cr-label'>{label}</span>"
+            f"<span class='cr-formula'>{formula}</span>"
+            f"{_cr_remark(cr)}"
+            f"</div>"
+        )
 
     return f"""
 <div class="section">
   <h2>Compression Robustness</h2>
   <p class="tier-desc">
     How much does performance degrade when forensic signals are erased by JPEG re-compression?
-    A score of 1.0 means no degradation; lower values indicate the model depends heavily on
-    compression artifact fingerprints. CR is clamped to 1.0 — values where C4 performance
-    exceeds C0 are treated as no degradation (statistical variation).
+    CR = score<sub>C4</sub>&thinsp;/&thinsp;score<sub>C0</sub>, clamped to 1.0. A score of 1.0 means no
+    degradation; lower values indicate the model depends heavily on compression artifact fingerprints.
+    CR is reported as N/A when the C0 score is below the metric-specific minimum threshold
+    (AUC &lt; 0.5, AUPRC &lt; 0.667, Region-F1 &lt; 0.05).
   </p>
 
   <div class="cr-grid">
-    <div class="cr-card">
-      <span class="cr-value">{_f(cr_auc, 3)}</span>
-      <span class="cr-label">CR<sub>DocAUC</sub> — Detection Robustness</span>
-      <span class="cr-formula">1 &minus; (AUC<sub>C0</sub> &minus; AUC<sub>C4</sub>) / AUC<sub>C0</sub></span>
-      {_cr_remark(cr_auc)}
-    </div>
-    <div class="cr-card">
-      <span class="cr-value">{_f(cr_f1, 3)}</span>
-      <span class="cr-label">CR<sub>RegionF1</sub> — Localisation Robustness</span>
-      <span class="cr-formula">1 &minus; (F1<sub>C0</sub> &minus; F1<sub>C4</sub>) / F1<sub>C0</sub></span>
-      {_cr_remark(cr_f1)}
-    </div>
+    {_card(cr_auc,   "CR<sub>DocAUC</sub> — Detection Robustness",
+           "AUC<sub>C4</sub>&thinsp;/&thinsp;AUC<sub>C0</sub>")}
+    {_card(cr_auprc, "CR<sub>AUPRC</sub> — AUPRC Robustness",
+           "AUPRC<sub>C4</sub>&thinsp;/&thinsp;AUPRC<sub>C0</sub>")}
+    {_card(cr_f1,    "CR<sub>RegionF1</sub> — Localisation Robustness",
+           "F1<sub>C4</sub>&thinsp;/&thinsp;F1<sub>C0</sub>")}
   </div>
 
   <div class="cr-interp">
@@ -961,13 +995,12 @@ def _detection_chart_card(
 
 
 def _degradation_charts(tier_scores: dict[str, Any]) -> str:
-    detection_charts = [
-        _detection_chart_card("Doc-AUC", "detAucChart", "doc_auc", "#3b82f6", True,  "fixed", tier_scores),
-        _detection_chart_card("Doc-F1",  "detF1Chart",  "doc_f1",  "#8b5cf6", True,  "fixed", tier_scores),
-        _detection_chart_card("FPR",     "detFprChart", "doc_fpr", "#f97316", False, "auto",  tier_scores),
-    ]
-    detection_cards_html = "\n".join(html for html, _ in detection_charts)
-    detection_js = "\n".join(js for _, js in detection_charts)
+    auc_html, auc_js = _detection_chart_card(
+        "Doc-AUC", "detAucChart", "doc_auc", "#3b82f6", True, "fixed", tier_scores
+    )
+    auprc_html, auprc_js = _detection_chart_card(
+        "Doc-AUPRC", "detAuprcChart", "doc_auprc", "#0ea5e9", True, "fixed", tier_scores
+    )
 
     localisation_charts = [
         _detection_chart_card("Region Precision", "locPChart",  "region_precision", "#06b6d4", True, "auto", tier_scores),
@@ -977,13 +1010,13 @@ def _degradation_charts(tier_scores: dict[str, Any]) -> str:
     localisation_cards_html = "\n".join(html for html, _ in localisation_charts)
     localisation_js = "\n".join(js for _, js in localisation_charts)
 
-    tprf_charts = [
-        _detection_chart_card("Doc AUPRC",    "detAuprcChart",  "doc_auprc",        "#0ea5e9", True,  "fixed", tier_scores),
-        _detection_chart_card("FPR @ TPR=90", "detFprT90Chart", "doc_fpr_at_tpr90", "#f43f5e", False, "auto",  tier_scores),
-        _detection_chart_card("F1 @ TPR=90",  "detF1T90Chart",  "doc_f1_at_tpr90",  "#a855f7", True,  "fixed", tier_scores),
+    fpr_charts = [
+        _detection_chart_card("FPR @ TPR=80", "detFprT80Chart", "doc_fpr_at_tpr80", "#f43f5e", False, "auto", tier_scores),
+        _detection_chart_card("FPR @ TPR=85", "detFprT85Chart", "doc_fpr_at_tpr85", "#e11d48", False, "auto", tier_scores),
+        _detection_chart_card("FPR @ TPR=90", "detFprT90Chart", "doc_fpr_at_tpr90", "#be123c", False, "auto", tier_scores),
     ]
-    tprf_cards_html = "\n".join(html for html, _ in tprf_charts)
-    tprf_js = "\n".join(js for _, js in tprf_charts)
+    fpr_cards_html = "\n".join(html for html, _ in fpr_charts)
+    fpr_js = "\n".join(js for _, js in fpr_charts)
 
     return f"""
 <div class="section" style="padding:0.75rem 2rem">
@@ -996,26 +1029,28 @@ def _degradation_charts(tier_scores: dict[str, Any]) -> str:
   </p>
 </div>
 <div class="section" style="padding:0 2rem 0.25rem">
+  <h3 style="font-size:0.82rem;font-weight:700;color:#374151;margin:0">Document-Level Detection</h3>
+</div>
+<div class="charts-row-2">
+{auc_html}
+{auprc_html}
+</div>
+<div class="section" style="padding:0 2rem 0.25rem">
+  <h3 style="font-size:0.82rem;font-weight:700;color:#374151;margin:0">TPR-Anchored FPR</h3>
+</div>
+<div class="charts-row-3">
+{fpr_cards_html}
+</div>
+<div class="section" style="padding:0 2rem 0.25rem">
   <h3 style="font-size:0.82rem;font-weight:700;color:#374151;margin:0">Localisation Metrics</h3>
 </div>
 <div class="charts-row-3">
 {localisation_cards_html}
 </div>
-<div class="section" style="padding:0 2rem 0.25rem">
-  <h3 style="font-size:0.82rem;font-weight:700;color:#374151;margin:0">Document-Level Classification Metrics</h3>
-</div>
-<div class="charts-row-3">
-{detection_cards_html}
-</div>
-<div class="section" style="padding:0 2rem 0.25rem">
-  <h3 style="font-size:0.82rem;font-weight:700;color:#374151;margin:0">Threshold-Free &amp; Anchored Detection Metrics</h3>
-</div>
-<div class="charts-row-3">
-{tprf_cards_html}
-</div>
-{localisation_js}
-{detection_js}
-{tprf_js}"""
+{auc_js}
+{auprc_js}
+{fpr_js}
+{localisation_js}"""
 
 
 _GH_URL   = "https://github.com/Kriyam-ai/kriyam-tamperflow"
@@ -1063,13 +1098,15 @@ def _share_bar(model_name: str, tier_scores: dict[str, Any]) -> str:
             continue
         lines.append(
             f"  {tier}: Region-F1={s['region_f1']:.4f}  Doc-AUC={s['doc_auc']:.4f}"
-            f"  FPR={s['doc_fpr']:.4f}"
+            f"  AUPRC={s['doc_auprc']:.4f}"
         )
     c0, c4 = tier_scores.get("C0"), tier_scores.get("C4")
     if c0 and c4:
         cr_auc = _cr(float(c0["doc_auc"]), float(c4["doc_auc"]))
-        cr_f1  = _cr(float(c0["region_f1"]), float(c4["region_f1"]))
-        lines.append(f"  CR_DocAUC={cr_auc:.3f}  CR_RegionF1={cr_f1:.3f}")
+        cr_f1  = _cr(float(c0["region_f1"]), float(c4["region_f1"]), min_c0=0.05)
+        cr_auc_str = f"{cr_auc:.3f}" if cr_auc is not None else "N/A"
+        cr_f1_str  = f"{cr_f1:.3f}" if cr_f1 is not None else "N/A"
+        lines.append(f"  CR_DocAUC={cr_auc_str}  CR_RegionF1={cr_f1_str}")
     lines.append(_GH_URL)
     copy_text = "\\n".join(lines).replace("'", "\\'")
 
@@ -1200,12 +1237,13 @@ def _reading_guide() -> str:
         <dt>Doc-AUC</dt>
         <dd>Area under the ROC curve for document-level classification. Threshold-free.
             0.5&nbsp;= random; 1.0&nbsp;= perfect. Uses max(region confidence) as the document score.</dd>
-        <dt>Doc-F1</dt>
-        <dd>Binary classification F1 at document level. Derived from
-            pred_label = 1 if confidence ≥ document threshold (default 0.5).</dd>
-        <dt>FPR — False Positive Rate</dt>
-        <dd>Fraction of authentic documents incorrectly flagged as tampered.
-            FPR = FP&nbsp;/&nbsp;(FP&nbsp;+&nbsp;TN). Lower is better.</dd>
+        <dt>Doc-AUPRC</dt>
+        <dd>Area under the precision-recall curve. Threshold-free. Random baseline equals the
+            positive-class prior (≈&nbsp;0.67 for this benchmark's 700/350 split), not 0.5.</dd>
+        <dt>FPR @ TPR=80/85/90%</dt>
+        <dd>False Positive Rate at the tightest threshold that still achieves the target TPR.
+            Lower is better. Marked with&nbsp;† when the target TPR is unreachable
+            (shown at max achievable TPR). Threshold-free across models.</dd>
       </dl>
     </div>
 
@@ -1245,9 +1283,9 @@ def _reading_guide() -> str:
       <h3>Compression Robustness (CR)</h3>
       <p>Summarises how much a model's performance degrades from the pristine tier (C0) to the
          photocopy-simulation tier (C4). Computed as:
-         <strong>CR = 1 − (score<sub>C0</sub> − score<sub>C4</sub>) / score<sub>C0</sub></strong>.
-         Reported separately for Doc-AUC (detection) and Region-F1 (localisation).
-         CR is clamped to 1.0 — if C4 outperforms C0, it is treated as no degradation (statistical variation).</p>
+         <strong>CR = score<sub>C4</sub>&thinsp;/&thinsp;score<sub>C0</sub></strong>, clamped to 1.0.
+         Reported separately for Doc-AUC, AUPRC, and Region-F1.
+         Returns N/A when C0 is below the metric-specific minimum threshold (model performs near random).</p>
       <table class="guide-cr-table" style="margin-top:0.6rem;max-width:520px">
         <thead>
           <tr><th>CR score</th><th>Interpretation</th></tr>
@@ -1270,7 +1308,7 @@ def _reading_guide() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _v1_html(model_name: str, tier_scores: dict[str, Any], document_threshold: float) -> str:
+def _v1_html(model_name: str, tier_scores: dict[str, Any]) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1290,8 +1328,7 @@ def _v1_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
     <h1>Model: {model_name}</h1>
     <p class="meta">
       Benchmark v1.0 &nbsp;&middot;&nbsp;
-      1,050 documents (700 tampered, 350 authentic) &nbsp;&middot;&nbsp;
-      Document threshold: {document_threshold:.2f}
+      1,050 documents (700 tampered, 350 authentic)
     </p>
   </div>
 
@@ -1299,9 +1336,9 @@ def _v1_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
 
   {_merged_tier_table(tier_scores)}
 
-  {_degradation_charts(tier_scores)}
-
   {_cr_section(tier_scores)}
+
+  {_degradation_charts(tier_scores)}
 
   {_reading_guide()}
 
@@ -1534,19 +1571,20 @@ def _v2_overview(tier_scores: dict[str, Any]) -> str:
     c4 = tier_scores.get("C4", {})
 
     doc_auc   = float(c0.get("doc_auc",   0.0))
+    doc_auprc = float(c0.get("doc_auprc", 0.0))
     region_f1 = float(c0.get("region_f1", 0.0))
-    fpr       = float(c0.get("doc_fpr",   0.0))
-    cr_auc    = _cr(doc_auc, float(c4.get("doc_auc", 0.0))) if c4 else 1.0
+    cr_auc    = _cr(doc_auc, float(c4.get("doc_auc", 0.0))) if c4 else None
 
-    auc_note  = "above random" if doc_auc > 0.5 else "at or below random (0.5)"
-    fpr_note  = f"{fpr * 100:.0f}% of authentic docs flagged"
-    cr_note   = _cr_label(cr_auc)
+    auc_note   = "above random" if doc_auc > 0.5 else "at or below random (0.5)"
+    auprc_note = f"prior baseline ≈ 0.67; {'+' if doc_auprc > 0.667 else ''}{(doc_auprc - 0.667) * 100:.1f}pp vs baseline"
+    cr_note    = _cr_label(cr_auc)
+    cr_str     = f"{cr_auc:.3f}" if cr_auc is not None else "N/A"
 
     stats = [
-        ("Doc-AUC (C0)",   f"{doc_auc:.3f}",   auc_note),
-        ("Region-F1 (C0)", f"{region_f1:.4f}",  "localisation score at pristine tier"),
-        ("FPR (C0)",       f"{fpr:.3f}",        fpr_note),
-        ("CR — DocAUC",    f"{cr_auc:.3f}",     cr_note),
+        ("Doc-AUC (C0)",   f"{doc_auc:.3f}",    auc_note),
+        ("Doc-AUPRC (C0)", f"{doc_auprc:.3f}",   auprc_note),
+        ("Region-F1 (C0)", f"{region_f1:.4f}",   "localisation score at pristine tier"),
+        ("CR — DocAUC",    cr_str,               cr_note),
     ]
     cards = "".join(
         f"<div class='v2-stat'>"
@@ -1589,10 +1627,9 @@ def _v2_tier_breakdown(tier_scores: dict[str, Any]) -> str:
         ("region_f1",         "region_f1_ci",         "Region-F1"),
         ("doc_auc",           "doc_auc_ci",           "Doc-AUC"),
         ("doc_auprc",         "doc_auprc_ci",         "Doc-AUPRC"),
-        ("doc_f1",            "doc_f1_ci",            "Doc-F1"),
-        ("doc_fpr",           "doc_fpr_ci",           "FPR"),
+        ("doc_fpr_at_tpr80",  "doc_fpr_at_tpr80_ci",  "FPR@80"),
+        ("doc_fpr_at_tpr85",  "doc_fpr_at_tpr85_ci",  "FPR@85"),
         ("doc_fpr_at_tpr90",  "doc_fpr_at_tpr90_ci",  "FPR@90"),
-        ("doc_f1_at_tpr90",   "doc_f1_at_tpr90_ci",   "F1@90"),
     ]
 
     cards: list[str] = []
@@ -1649,13 +1686,15 @@ def _v2_cr(tier_scores: dict[str, Any]) -> str:
     if not c0 or not c4:
         return ""
 
-    cr_auc = _cr(float(c0["doc_auc"]),   float(c4["doc_auc"]))
-    cr_f1  = _cr(float(c0["region_f1"]), float(c4["region_f1"]))
+    cr_auc   = _cr(float(c0["doc_auc"]),   float(c4["doc_auc"]))
+    cr_auprc = _cr(float(c0["doc_auprc"]), float(c4["doc_auprc"]), min_c0=0.667)
+    cr_f1    = _cr(float(c0["region_f1"]), float(c4["region_f1"]), min_c0=0.05)
 
-    def _card(val: float, name: str, formula: str) -> str:
+    def _card(val: float | None, name: str, formula: str) -> str:
+        val_str = _f(val, 3) if val is not None else "N/A"
         return (
             f"<div class='v2-cr-card'>"
-            f"<div class='v2-cr-num'>{_f(val, 3)}</div>"
+            f"<div class='v2-cr-num'>{val_str}</div>"
             f"<div class='v2-cr-name'>{name}</div>"
             f"<div class='v2-cr-interp'>{_cr_label(val)}</div>"
             f"<div class='v2-cr-formula'>{formula}</div>"
@@ -1664,10 +1703,12 @@ def _v2_cr(tier_scores: dict[str, Any]) -> str:
 
     return (
         f"<div class='v2-cr-grid'>"
-        + _card(cr_auc, "CR<sub>DocAUC</sub> &mdash; Detection Robustness",
-                "1 &minus; (AUC<sub>C0</sub> &minus; AUC<sub>C4</sub>) / AUC<sub>C0</sub>")
-        + _card(cr_f1,  "CR<sub>RegionF1</sub> &mdash; Localisation Robustness",
-                "1 &minus; (F1<sub>C0</sub> &minus; F1<sub>C4</sub>) / F1<sub>C0</sub>")
+        + _card(cr_auc,   "CR<sub>DocAUC</sub> &mdash; Detection Robustness",
+                "AUC<sub>C4</sub>&thinsp;/&thinsp;AUC<sub>C0</sub>")
+        + _card(cr_auprc, "CR<sub>AUPRC</sub> &mdash; AUPRC Robustness",
+                "AUPRC<sub>C4</sub>&thinsp;/&thinsp;AUPRC<sub>C0</sub>")
+        + _card(cr_f1,    "CR<sub>RegionF1</sub> &mdash; Localisation Robustness",
+                "F1<sub>C4</sub>&thinsp;/&thinsp;F1<sub>C0</sub>")
         + "</div>"
     )
 
@@ -1685,7 +1726,7 @@ def _v2_footer() -> str:
     )
 
 
-def _v2_html(model_name: str, tier_scores: dict[str, Any], document_threshold: float) -> str:
+def _v2_html(model_name: str, tier_scores: dict[str, Any]) -> str:
     loc_series = [
         ("region_precision", "Region-P",  "#06b6d4"),
         ("region_recall",    "Region-R",  "#f59e0b"),
@@ -1694,10 +1735,9 @@ def _v2_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
     det_series = [
         ("doc_auc",          "Doc-AUC",    "#3b82f6"),
         ("doc_auprc",        "Doc-AUPRC",  "#0ea5e9"),
-        ("doc_f1",           "Doc-F1",     "#8b5cf6"),
-        ("doc_fpr",          "FPR",        "#f97316"),
-        ("doc_fpr_at_tpr90", "FPR@TPR=90", "#f43f5e"),
-        ("doc_f1_at_tpr90",  "F1@TPR=90",  "#a855f7"),
+        ("doc_fpr_at_tpr80", "FPR@TPR=80", "#f43f5e"),
+        ("doc_fpr_at_tpr85", "FPR@TPR=85", "#e11d48"),
+        ("doc_fpr_at_tpr90", "FPR@TPR=90", "#be123c"),
     ]
 
     loc_chart = _v2_chart_section(
@@ -1710,7 +1750,7 @@ def _v2_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
         "Detection Metrics across Compression Tiers",
         "v2DetChart", det_series, tier_scores,
         y_scale="fixed",
-        note="Lower FPR and FPR@TPR=90 is better; all others higher is better.",
+        note="Lower FPR@TPR=80/85/90 is better; Doc-AUC and Doc-AUPRC higher is better.",
     )
 
     total_n = sum(
@@ -1736,8 +1776,7 @@ def _v2_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
     <h1>{model_name}</h1>
     <p class="v2-meta">
       1,050 documents (700 tampered, 350 authentic) &nbsp;&middot;&nbsp;
-      {total_n} predictions evaluated &nbsp;&middot;&nbsp;
-      Document threshold: {document_threshold:.2f}
+      {total_n} predictions evaluated
     </p>
   </div>
 
@@ -2001,7 +2040,7 @@ body {
 """
 
 
-def _v3_abstract(model_name: str, tier_scores: dict[str, Any], document_threshold: float) -> str:
+def _v3_abstract(model_name: str, tier_scores: dict[str, Any]) -> str:
     total_n = sum(int(tier_scores[t]["n_samples"]) for t in _ALL_TIERS if t in tier_scores)
     tiers_present = [t for t in _ALL_TIERS if t in tier_scores]
     tiers_str = ", ".join(tiers_present)
@@ -2013,10 +2052,11 @@ def _v3_abstract(model_name: str, tier_scores: dict[str, Any], document_threshol
 
     if auc_c0 is not None and auc_c4 is not None:
         cr  = _cr(auc_c0, auc_c4)
+        cr_str = _f(cr, 3) if cr is not None else "N/A"
         perf = (
             f" At the pristine tier (C0), the model attains a document-level AUC-ROC of "
             f"{_f(auc_c0)} and a Region-F1 of {_f(f1_c0 or 0.0)}."
-            f" The detection Compression Robustness score is {_f(cr, 3)}"
+            f" The detection Compression Robustness score is {cr_str}"
             f" ({_cr_label(cr)})."
         )
     elif auc_c0 is not None:
@@ -2037,8 +2077,7 @@ def _v3_abstract(model_name: str, tier_scores: dict[str, Any], document_threshol
   The evaluation covers {total_n}&nbsp;predictions across
   {len(tiers_present)}&nbsp;compression tier{"s" if len(tiers_present) > 1 else ""}
   ({tiers_str}), using pixel-level region matching with Hungarian assignment
-  (IoU&nbsp;≥&nbsp;0.1) and a fixed document confidence threshold
-  of&nbsp;{document_threshold:.2f}.{perf}
+  (IoU&nbsp;≥&nbsp;0.1).{perf}
   All point estimates are accompanied by 95% bootstrap confidence intervals
   (1,000 resamples).</p>
 </div>"""
@@ -2052,10 +2091,9 @@ def _v3_results_table(tier_scores: dict[str, Any]) -> str:
         ("region_f1",         "region_f1_ci",         "Reg-F1"),
         ("doc_auc",           "doc_auc_ci",           "Doc-AUC"),
         ("doc_auprc",         "doc_auprc_ci",         "AUPRC"),
-        ("doc_f1",            "doc_f1_ci",            "Doc-F1"),
-        ("doc_fpr",           "doc_fpr_ci",           "FPR ↓"),
+        ("doc_fpr_at_tpr80",  "doc_fpr_at_tpr80_ci",  "FPR@80 ↓"),
+        ("doc_fpr_at_tpr85",  "doc_fpr_at_tpr85_ci",  "FPR@85 ↓"),
         ("doc_fpr_at_tpr90",  "doc_fpr_at_tpr90_ci",  "FPR@90 ↓"),
-        ("doc_f1_at_tpr90",   "doc_f1_at_tpr90_ci",   "F1@90"),
     ]
     header_cells = "<th>Tier</th>" + "".join(f"<th>{lbl}</th>" for _, _, lbl in cols)
 
@@ -2094,8 +2132,8 @@ def _v3_results_table(tier_scores: dict[str, Any]) -> str:
 </div>
 <p class="v3-tbl-note"><strong>Table 1.</strong> Per-tier evaluation results.
 Values shown as point estimate with 95% bootstrap CI [lo,&thinsp;hi] (1,000 resamples) in grey below.
-FPR ↓ and FPR@90 ↓ lower is better; all other metrics higher is better.
-† TPR ≥ 0.90 not reachable — shown at max achievable TPR.
+FPR@80/85/90 ↓ lower is better; all other metrics higher is better.
+† TPR target not reachable — shown at max achievable TPR.
 Compression Robustness is reported separately in Section&nbsp;3.</p>"""
 
 
@@ -2127,13 +2165,15 @@ def _v3_cr_section(tier_scores: dict[str, Any]) -> str:
             "Compression Robustness requires both C0 and C4 tiers to be evaluated.</p>"
         )
 
-    cr_auc = _cr(float(c0["doc_auc"]),   float(c4["doc_auc"]))
-    cr_f1  = _cr(float(c0["region_f1"]), float(c4["region_f1"]))
+    cr_auc   = _cr(float(c0["doc_auc"]),   float(c4["doc_auc"]))
+    cr_auprc = _cr(float(c0["doc_auprc"]), float(c4["doc_auprc"]), min_c0=0.667)
+    cr_f1    = _cr(float(c0["region_f1"]), float(c4["region_f1"]), min_c0=0.05)
 
-    def _box(val: float, name: str, formula: str) -> str:
+    def _box(val: float | None, name: str, formula: str) -> str:
+        val_str = _f(val, 3) if val is not None else "N/A"
         return (
             f"<div class='v3-cr-box'>"
-            f"<span class='v3-cr-num'>{_f(val, 3)}</span>"
+            f"<span class='v3-cr-num'>{val_str}</span>"
             f"<span class='v3-cr-name'>{name}</span>"
             f"<span class='v3-cr-interp'>{_cr_label(val)}</span>"
             f"<span class='v3-cr-formula'>{formula}</span>"
@@ -2144,15 +2184,18 @@ def _v3_cr_section(tier_scores: dict[str, Any]) -> str:
         f"<div class='v3-cr-grid'>"
         + _box(cr_auc,
                "CR<sub>DocAUC</sub> &mdash; Detection Robustness",
-               "1 &minus; (AUC<sub>C0</sub> &minus; AUC<sub>C4</sub>) / AUC<sub>C0</sub>")
+               "AUC<sub>C4</sub>&thinsp;/&thinsp;AUC<sub>C0</sub>")
+        + _box(cr_auprc,
+               "CR<sub>AUPRC</sub> &mdash; AUPRC Robustness",
+               "AUPRC<sub>C4</sub>&thinsp;/&thinsp;AUPRC<sub>C0</sub>")
         + _box(cr_f1,
                "CR<sub>RegionF1</sub> &mdash; Localisation Robustness",
-               "1 &minus; (F1<sub>C0</sub> &minus; F1<sub>C4</sub>) / F1<sub>C0</sub>")
+               "F1<sub>C4</sub>&thinsp;/&thinsp;F1<sub>C0</sub>")
         + "</div>"
         + "<p class='v3-tbl-note'><strong>Table 2.</strong> Compression Robustness scores. "
-          "CR&nbsp;=&nbsp;1&nbsp;&minus;&nbsp;(score<sub>C0</sub>&nbsp;&minus;&nbsp;score<sub>C4</sub>)&thinsp;/"
-          "&thinsp;score<sub>C0</sub>. Clamped at 1.0; values where C4&nbsp;&gt;&nbsp;C0 "
-          "are treated as no degradation (statistical variation).</p>"
+          "CR&nbsp;=&nbsp;score<sub>C4</sub>&thinsp;/&thinsp;score<sub>C0</sub>, clamped at 1.0. "
+          "N/A when C0 is below the metric-specific threshold (AUC &lt; 0.5, AUPRC &lt; 0.667, "
+          "Region-F1 &lt; 0.05).</p>"
     )
 
 
@@ -2201,12 +2244,12 @@ def _v3_reading_guide() -> str:
       <dt>Doc-AUC</dt>
       <dd>Area under ROC curve. Threshold-free; uses max(region confidence)
           as the document score. 0.5&nbsp;=&nbsp;random, 1.0&nbsp;=&nbsp;perfect.</dd>
-      <dt>Doc-F1</dt>
-      <dd>Binary classification F1. Derived from pred_label&nbsp;=&nbsp;1
-          if confidence&nbsp;≥&nbsp;threshold (default 0.50).</dd>
-      <dt>FPR (↓ lower is better)</dt>
-      <dd>Fraction of authentic documents flagged as tampered.
-          FP&nbsp;/&nbsp;(FP&nbsp;+&nbsp;TN).</dd>
+      <dt>AUPRC</dt>
+      <dd>Area under precision-recall curve. Threshold-free. Random baseline
+          equals the positive-class prior (≈&nbsp;0.67 for this benchmark).</dd>
+      <dt>FPR@TPR=80/85/90 (↓ lower is better)</dt>
+      <dd>FPR at the tightest threshold achieving the target TPR.
+          Threshold-free across models. † when target TPR is unreachable.</dd>
     </dl>
   </div>
 
@@ -2223,7 +2266,8 @@ def _v3_reading_guide() -> str:
       </tbody>
     </table>
     <p style="margin-top:0.5rem">
-      <strong>CR</strong>&nbsp;=&nbsp;1&nbsp;&minus;&nbsp;(score<sub>C0</sub>&nbsp;&minus;&nbsp;score<sub>C4</sub>)&thinsp;/&thinsp;score<sub>C0</sub>.
+      <strong>CR</strong>&nbsp;=&nbsp;score<sub>C4</sub>&thinsp;/&thinsp;score<sub>C0</sub>, clamped at 1.0.
+      N/A when C0 is below the metric floor.
       Range: ≥0.9&nbsp;=&nbsp;excellent, 0.7–0.9&nbsp;=&nbsp;moderate,
       0.5–0.7&nbsp;=&nbsp;significant, &lt;0.5&nbsp;=&nbsp;severe degradation.
     </p>
@@ -2232,16 +2276,15 @@ def _v3_reading_guide() -> str:
 </div>"""
 
 
-def _v3_html(model_name: str, tier_scores: dict[str, Any], document_threshold: float) -> str:
+def _v3_html(model_name: str, tier_scores: dict[str, Any]) -> str:
     total_n = sum(int(tier_scores[t]["n_samples"]) for t in _ALL_TIERS if t in tier_scores)
 
     det_series = [
         ("doc_auc",          "Doc-AUC",    "#1d4ed8"),
         ("doc_auprc",        "AUPRC",      "#0369a1"),
-        ("doc_f1",           "Doc-F1",     "#6d28d9"),
-        ("doc_fpr",          "FPR",        "#b91c1c"),
+        ("doc_fpr_at_tpr80", "FPR@TPR=80", "#f43f5e"),
+        ("doc_fpr_at_tpr85", "FPR@TPR=85", "#e11d48"),
         ("doc_fpr_at_tpr90", "FPR@TPR=90", "#be123c"),
-        ("doc_f1_at_tpr90",  "F1@TPR=90",  "#7e22ce"),
     ]
     loc_series = [
         ("region_precision", "Region-P",  "#0e7490"),
@@ -2252,9 +2295,9 @@ def _v3_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
     det_fig = _v3_figure_chart(
         "v3DetChart", 1,
         "Detection Metrics",
-        "Doc-AUC, AUPRC, Doc-F1, FPR, FPR@TPR=90, and F1@TPR=90 across compression tiers "
+        "Doc-AUC, AUPRC, and FPR@TPR=80/85/90 across compression tiers "
         "C0&thinsp;→&thinsp;C2&thinsp;→&thinsp;C4. "
-        "FPR and FPR@TPR=90 lower is better; all others higher is better.",
+        "FPR@TPR=80/85/90 lower is better; Doc-AUC and AUPRC higher is better.",
         det_series, tier_scores, y_scale="fixed",
     )
     loc_fig = _v3_figure_chart(
@@ -2285,23 +2328,22 @@ def _v3_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
     <p class="v3-model-line">Model: {model_name}</p>
     <p class="v3-meta-line">
       Benchmark v1.0 &nbsp;&middot;&nbsp;
-      {total_n} predictions evaluated &nbsp;&middot;&nbsp;
-      Document threshold: {document_threshold:.2f}
+      {total_n} predictions evaluated
     </p>
   </div>
 
   <hr class="v3-rule-double">
 
-  {_v3_abstract(model_name, tier_scores, document_threshold)}
+  {_v3_abstract(model_name, tier_scores)}
   {_missing_authentic_warning(tier_scores)}
 
   <hr class="v3-rule-double">
 
   <h2 class="v3-h2">1.&ensp;Evaluation Results</h2>
   <p style="font-size:9pt;color:#666;margin:0 0 0.75rem;font-style:italic">
-    Six metrics reported independently for each compression tier: three localisation metrics
-    (Reg-P, Reg-R, Reg-F1) measuring tampered-region detection accuracy, and three detection
-    metrics (Doc-AUC, Doc-F1, FPR) measuring document-level classification.
+    Eight metrics reported independently for each compression tier: three localisation metrics
+    (Reg-P, Reg-R, Reg-F1) measuring tampered-region detection accuracy, and five detection
+    metrics (Doc-AUC, AUPRC, FPR@TPR=80/85/90) measuring document-level classification.
     Each value is accompanied by a 95% bootstrap confidence interval shown in grey below.
   </p>
   {_v3_results_table(tier_scores)}
@@ -2341,6 +2383,380 @@ def _v3_html(model_name: str, tier_scores: dict[str, Any], document_threshold: f
 
 
 # ---------------------------------------------------------------------------
+# Template v5 — compact dashboard
+# ---------------------------------------------------------------------------
+
+_CSS_V5 = """\
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #f0f2f5;
+  margin: 0;
+  padding: 0.6rem 0.75rem 2.5rem;
+}
+
+.page { max-width: 1100px; margin: 0 auto; }
+
+/* ── header ── */
+.v5-header {
+  background: #111827;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  margin-bottom: 0.55rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.v5-bench {
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.v5-header h1 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0;
+  color: #f9fafb;
+}
+.v5-meta {
+  font-size: 0.7rem;
+  color: #6b7280;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ── section card ── */
+.section {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem 1.1rem;
+  margin-bottom: 0.55rem;
+}
+.section h2 {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 0.2rem;
+}
+.section .tier-desc {
+  font-size: 0.72rem;
+  color: #6b7280;
+  margin: 0 0 0.55rem;
+}
+
+/* ── tables ── */
+table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+thead th {
+  background: #f9fafb;
+  text-align: left;
+  padding: 0.28rem 0.65rem;
+  border-bottom: 2px solid #e5e7eb;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  font-weight: 600;
+}
+tbody td {
+  padding: 0.28rem 0.65rem;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #fafafa; }
+.metric-name { font-weight: 500; color: #374151; }
+.metric-val  { font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; }
+.ci-range    { font-size: 0.68rem; color: #9ca3af; }
+.tier-stripe { border-left: 3px solid var(--tier-color); }
+
+/* merged tier table */
+.mtt-tier-hdr {
+  text-align: center !important;
+  border-top: 3px solid currentColor;
+  padding-top: 0.35rem !important;
+}
+.mtt-tier-name { display: block; font-size: 0.72rem; font-weight: 700; }
+.mtt-tier-desc { display: block; font-size: 0.61rem; font-weight: 400; text-transform: none;
+                 letter-spacing: 0; color: #9ca3af; margin-top: 0.05rem; }
+.mtt-cell { text-align: center; vertical-align: middle !important; }
+.mtt-val  { display: block; font-size: 0.88rem; font-weight: 700; color: #111827;
+            font-variant-numeric: tabular-nums; }
+.mtt-ci   { display: block; font-size: 0.62rem; color: #9ca3af; margin: 0.05rem 0 0.12rem; }
+.mtt-spark-hdr { text-align: center !important; color: #9ca3af !important; font-weight: 500 !important; }
+.mtt-spark { text-align: center; vertical-align: middle !important; padding: 0.12rem 0.65rem !important; }
+.metric-group-header td {
+  padding: 0.3rem 0.65rem 0.18rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  border-top: 1px solid #e5e7eb;
+}
+.metric-group-header.first-group td { border-top: none; }
+
+/* CI tags */
+.ci-tag {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.08rem 0.38rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.ci-confident { background: #d1fae5; color: #065f46; }
+.ci-moderate  { background: #fef3c7; color: #92400e; }
+.ci-wide      { background: #fee2e2; color: #991b1b; }
+
+/* n-note */
+.n-note { font-size: 0.68rem; color: #9ca3af; margin: 0.35rem 0 0; text-align: right; }
+
+/* ── compact CR strip ── */
+.v5-cr-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 540px) { .v5-cr-strip { grid-template-columns: 1fr; } }
+.v5-cr-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  border-left: 3px solid #3b82f6;
+  padding: 0.55rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.v5-cr-val {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #111827;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.v5-cr-meta { flex: 1; min-width: 0; }
+.v5-cr-label { font-size: 0.72rem; font-weight: 700; color: #374151; }
+.v5-cr-formula { font-size: 0.63rem; color: #9ca3af; font-style: italic; }
+.v5-cr-remark { font-size: 0.65rem; font-weight: 600; margin-top: 0.15rem; }
+.v5-cr-remark.good    { color: #16a34a; }
+.v5-cr-remark.neutral { color: #d97706; }
+.v5-cr-remark.bad     { color: #dc2626; }
+.v5-cr-remark.na      { color: #9ca3af; }
+
+/* ── chart grids ── */
+.charts-row-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 520px) { .charts-row-2 { grid-template-columns: 1fr; } }
+.charts-row-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 640px) { .charts-row-3 { grid-template-columns: 1fr; } }
+.charts-row-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 860px) { .charts-row-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 440px) { .charts-row-4 { grid-template-columns: 1fr; } }
+.span-full { grid-column: 1 / -1; }
+
+.chart-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem 0.5rem;
+}
+.chart-card h3 { font-size: 0.75rem; font-weight: 700; color: #111827; margin: 0 0 0.08rem; }
+.chart-card .chart-sub { font-size: 0.63rem; color: #6b7280; margin: 0 0 0.45rem; }
+.chart-card canvas { max-height: 155px; }
+.hb-badge {
+  font-size: 0.52rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; padding: 0.07rem 0.3rem;
+  border-radius: 999px; vertical-align: middle; white-space: nowrap;
+  background: #eef2ff; color: #4338ca;
+}
+.chart-remark {
+  font-size: 0.65rem; margin: 0.4rem 0 0; padding: 0.3rem 0.5rem;
+  border-radius: 5px; line-height: 1.4;
+}
+.chart-remark .remark-arrow { font-weight: 700; margin-right: 0.1rem; }
+.chart-remark.good    { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.chart-remark.bad     { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.chart-remark.neutral { background: #f9fafb; color: #6b7280; border: 1px solid #e5e7eb; }
+
+/* chart group headings */
+.v5-chart-h {
+  font-size: 0.63rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.09em; color: #9ca3af;
+  margin: 0.65rem 0 0.3rem;
+}
+
+/* footer */
+.v5-footer {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: #111827;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: #6b7280;
+}
+.v5-footer a { color: #9ca3af; text-decoration: none; }
+.v5-footer a:hover { color: #f9fafb; }
+"""
+
+
+def _v5_cr_strip(tier_scores: dict[str, Any]) -> str:
+    c0 = tier_scores.get("C0")
+    c4 = tier_scores.get("C4")
+    if c0 is None or c4 is None:
+        return ""
+
+    cr_auc   = _cr(float(c0["doc_auc"]),   float(c4["doc_auc"]))
+    cr_auprc = _cr(float(c0["doc_auprc"]), float(c4["doc_auprc"]), min_c0=0.667)
+    cr_f1    = _cr(float(c0["region_f1"]), float(c4["region_f1"]), min_c0=0.05)
+
+    def _remark(cr: float | None) -> tuple[str, str]:
+        if cr is None:
+            return "N/A — C0 below floor", "na"
+        if cr >= 0.9:
+            return "Excellent", "good"
+        if cr >= 0.7:
+            return "Moderate loss", "neutral"
+        if cr >= 0.5:
+            return "Significant loss", "bad"
+        return "Severe loss", "bad"
+
+    def _card(cr: float | None, label: str, formula: str, accent: str) -> str:
+        val_str = _f(cr, 3) if cr is not None else "N/A"
+        remark, cls = _remark(cr)
+        return (
+            f"<div class='v5-cr-card' style='border-left-color:{accent}'>"
+            f"<span class='v5-cr-val'>{val_str}</span>"
+            f"<div class='v5-cr-meta'>"
+            f"<div class='v5-cr-label'>{label}</div>"
+            f"<div class='v5-cr-formula'>{formula}</div>"
+            f"<div class='v5-cr-remark {cls}'>{remark}</div>"
+            f"</div></div>"
+        )
+
+    return f"""<div class="v5-cr-strip">
+  {_card(cr_auc,   "CR<sub>DocAUC</sub>",
+         "AUC<sub>C4</sub>&thinsp;/&thinsp;AUC<sub>C0</sub>",     "#3b82f6")}
+  {_card(cr_auprc, "CR<sub>AUPRC</sub>",
+         "AUPRC<sub>C4</sub>&thinsp;/&thinsp;AUPRC<sub>C0</sub>", "#0ea5e9")}
+  {_card(cr_f1,    "CR<sub>RegionF1</sub>",
+         "F1<sub>C4</sub>&thinsp;/&thinsp;F1<sub>C0</sub>",        "#10b981")}
+</div>"""
+
+
+def _v5_charts(tier_scores: dict[str, Any]) -> str:
+    auc_html,   auc_js   = _detection_chart_card("Doc-AUC",      "v5AucChart",    "doc_auc",          "#3b82f6", True,  "fixed", tier_scores)
+    auprc_html, auprc_js = _detection_chart_card("Doc-AUPRC",    "v5AuprcChart",  "doc_auprc",        "#0ea5e9", True,  "fixed", tier_scores)
+    fpr80_html, fpr80_js = _detection_chart_card("FPR @ TPR=80", "v5Fpr80Chart",  "doc_fpr_at_tpr80", "#f43f5e", False, "auto",  tier_scores)
+    fpr85_html, fpr85_js = _detection_chart_card("FPR @ TPR=85", "v5Fpr85Chart",  "doc_fpr_at_tpr85", "#e11d48", False, "auto",  tier_scores)
+    fpr90_html, fpr90_js = _detection_chart_card("FPR @ TPR=90", "v5Fpr90Chart",  "doc_fpr_at_tpr90", "#be123c", False, "auto",  tier_scores)
+    rp_html,    rp_js    = _detection_chart_card("Region P",     "v5LocPChart",   "region_precision", "#06b6d4", True,  "auto",  tier_scores)
+    rr_html,    rr_js    = _detection_chart_card("Region R",     "v5LocRChart",   "region_recall",    "#f59e0b", True,  "auto",  tier_scores)
+    rf1_html,   rf1_js   = _detection_chart_card("Region F1",    "v5LocF1Chart",  "region_f1",        "#10b981", True,  "auto",  tier_scores)
+
+    all_js = "\n".join([auc_js, auprc_js, fpr80_js, fpr85_js, fpr90_js, rp_js, rr_js, rf1_js])
+
+    return f"""
+<p class="v5-chart-h">Document-Level Detection</p>
+<div class="charts-row-2">
+{auc_html}
+{auprc_html}
+</div>
+<p class="v5-chart-h">TPR-Anchored FPR</p>
+<div class="charts-row-3">
+{fpr80_html}
+{fpr85_html}
+{fpr90_html}
+</div>
+<p class="v5-chart-h">Localisation</p>
+<div class="charts-row-3">
+{rp_html}
+{rr_html}
+{rf1_html}
+</div>
+{all_js}"""
+
+
+def _v5_html(model_name: str, tier_scores: dict[str, Any]) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kriyam TamperFlow &mdash; {model_name}</title>
+  <style>
+{_CSS_V5}
+  </style>
+  <script src="{_CHART_JS}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+<div class="page">
+
+  <div class="v5-header">
+    <span class="v5-bench">Kriyam TamperFlow</span>
+    <h1>{model_name}</h1>
+    <span class="v5-meta">1,050 docs &middot; 700 tampered &middot; 350 authentic &middot; Benchmark v1.0</span>
+  </div>
+
+  {_missing_authentic_warning(tier_scores)}
+
+  {_merged_tier_table(tier_scores)}
+
+  {_v5_cr_strip(tier_scores)}
+
+  {_v5_charts(tier_scores)}
+
+  <div class="v5-footer">
+    <span>Kriyam TamperFlow &mdash; Evaluation Report</span>
+    <span>
+      <a href="{_GH_URL}" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      <a href="{_HF_URL}" target="_blank" rel="noopener">HuggingFace</a>
+      &nbsp;&middot;&nbsp;
+      <a href="{_LABS_URL}" target="_blank" rel="noopener">Kriyam Labs</a>
+    </span>
+  </div>
+
+</div>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -2349,21 +2765,22 @@ def generate(scores: dict[str, Any], output_path: str, template: str = "v1") -> 
     """Write a self-contained HTML evaluation report.
 
     Args:
-        scores: Dict with ``"model"`` (str), ``"tiers"`` (tier → aggregate dict),
-            and optionally ``"document_threshold"`` (float).
+        scores: Dict with ``"model"`` (str) and ``"tiers"`` (tier → aggregate dict).
         output_path: Destination path for the HTML file.
-        template: ``"v1"`` (card layout), ``"v2"`` (research-report), or
-            ``"v3"`` (academic paper style with serif type and booktabs tables).
+        template: ``"v1"`` (card layout), ``"v2"`` (research-report),
+            ``"v3"`` (academic paper style with serif type and booktabs tables),
+            or ``"v5"`` (compact dashboard).
     """
-    model_name: str    = scores.get("model", "unknown")
-    tier_scores: dict  = scores.get("tiers", {})
-    document_threshold = float(scores.get("document_threshold", 0.5))
+    model_name: str   = scores.get("model", "unknown")
+    tier_scores: dict = scores.get("tiers", {})
 
     if template == "v2":
-        html = _v2_html(model_name, tier_scores, document_threshold)
+        html = _v2_html(model_name, tier_scores)
     elif template == "v3":
-        html = _v3_html(model_name, tier_scores, document_threshold)
+        html = _v3_html(model_name, tier_scores)
+    elif template == "v5":
+        html = _v5_html(model_name, tier_scores)
     else:
-        html = _v1_html(model_name, tier_scores, document_threshold)
+        html = _v1_html(model_name, tier_scores)
 
     Path(output_path).write_text(html, encoding="utf-8")

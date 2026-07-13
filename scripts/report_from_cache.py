@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Re-generate an evaluation report from cached raw results at a new threshold.
+"""Re-generate an evaluation report from cached raw results.
 
 Instead of re-running the full evaluation (15-20 min), this script reads the
-``raw_results.jsonl`` file written by ``evaluate.py``, re-applies the document
-threshold, re-aggregates metrics, and writes a new HTML report in seconds.
+``raw_results.jsonl`` file written by ``evaluate.py``, re-aggregates metrics,
+and writes a new HTML report in seconds.
 
 Usage
 -----
 python scripts/report_from_cache.py \\
     --results results/DTD-v2/ \\
-    --document-threshold 0.3 \\
-    --report-out reports/DTD-v2-t030.html
+    --report-out reports/DTD-v2-refresh.html
 
-The only metrics that change with the threshold are Doc-F1 and FPR.
-Doc-AUC and all region metrics (Region-P/R/F1) are always threshold-free
-and will be identical to the original run.
+All metrics (Doc-AUC, AUPRC, FPR@TPR80/85/90, Region-P/R/F1) are fully
+recomputed from the saved per-image confidences and ground-truth labels.
+Old raw_results.jsonl files that contain a ``pred_label`` field (written by
+an earlier version of evaluate.py) are still readable — the field is ignored.
 """
 
 from __future__ import annotations
@@ -31,8 +31,6 @@ from kriyam import report
 from kriyam.metrics import aggregate
 
 _LOG = logging.getLogger("kriyam.report_from_cache")
-
-DOCUMENT_THRESHOLD: float = 0.5
 
 
 def _load_raw_results(raw_path: Path) -> list[dict]:
@@ -56,21 +54,23 @@ def _load_raw_results(raw_path: Path) -> list[dict]:
 
 def _reaggregate(
     raw_rows: list[dict],
-    document_threshold: float,
     tiers: list[str],
 ) -> dict[str, dict]:
-    """Re-apply threshold and aggregate per tier."""
+    """Aggregate raw rows per tier.
+
+    Old raw_results.jsonl files may contain a ``pred_label`` field from a prior
+    version of evaluate.py.  It is silently discarded here — aggregate() no
+    longer uses it.
+    """
     tier_results: dict[str, list[dict]] = {t: [] for t in tiers}
 
     for row in raw_rows:
         tier = row.get("tier", "")
         if tier not in tier_results:
             continue
-        # Re-derive pred_label from the saved pred_confidence and the new threshold.
-        pred_confidence = float(row.get("pred_confidence", 0.0))
-        updated = dict(row)
-        updated["pred_label"] = int(pred_confidence >= document_threshold)
-        tier_results[tier].append(updated)
+        cleaned = dict(row)
+        cleaned.pop("pred_label", None)  # backward compat: ignore if present
+        tier_results[tier].append(cleaned)
 
     tier_scores: dict[str, dict] = {}
     for tier in tiers:
@@ -86,18 +86,17 @@ def _reaggregate(
 
 def _write_scores(
     tier_scores: dict[str, dict],
-    model_name: str,
     results_dir: Path,
-    document_threshold: float,
+    model_name: str,
 ) -> Path:
     out_dir = results_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    scores_path = out_dir / f"scores_t{int(document_threshold * 100):03d}.json"
+    scores_path = out_dir / "scores_refreshed.json"
     serialisable = {
         t: {k: list(v) if isinstance(v, tuple) else v for k, v in s.items()}
         for t, s in tier_scores.items()
     }
-    payload = {"model": model_name, "document_threshold": document_threshold, "tiers": serialisable}
+    payload = {"model": model_name, "tiers": serialisable}
     scores_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return scores_path
 
@@ -105,7 +104,7 @@ def _write_scores(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="report_from_cache.py",
-        description="Re-generate a report from cached raw results at a new threshold.",
+        description="Re-generate a report from cached raw results.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -113,13 +112,6 @@ def main(argv: list[str] | None = None) -> None:
         required=True,
         metavar="DIR",
         help="Path to the model's results directory (e.g. results/DTD-v2/).",
-    )
-    parser.add_argument(
-        "--document-threshold",
-        type=float,
-        default=DOCUMENT_THRESHOLD,
-        metavar="FLOAT",
-        help="New confidence threshold for binary document-level prediction.",
     )
     parser.add_argument(
         "--tiers",
@@ -136,7 +128,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--report-template",
-        choices=["v1", "v2", "v3"],
+        choices=["v1", "v2", "v3", "v5"],
         default="v1",
         help="Report template.",
     )
@@ -154,26 +146,31 @@ def main(argv: list[str] | None = None) -> None:
     raw_rows = _load_raw_results(raw_path)
     _LOG.info("Loaded %d raw result rows from %s", len(raw_rows), raw_path)
 
-    tier_scores = _reaggregate(raw_rows, args.document_threshold, args.tiers)
+    tier_scores = _reaggregate(raw_rows, args.tiers)
     if not tier_scores:
         _LOG.error("No tier scores produced. Check that raw_results.jsonl is not empty.")
         sys.exit(1)
 
     model_name = results_dir.name
-    scores_path = _write_scores(tier_scores, model_name, results_dir, args.document_threshold)
+    scores_path = _write_scores(tier_scores, results_dir, model_name)
     _LOG.info("Scores written to %s", scores_path)
 
     report_out = Path(args.report_out)
     report_out.parent.mkdir(parents=True, exist_ok=True)
     report.generate(
-        scores={"model": model_name, "document_threshold": args.document_threshold, "tiers": tier_scores},
+        scores={"model": model_name, "tiers": tier_scores},
         output_path=str(report_out),
         template=args.report_template,
     )
     _LOG.info("Report written to %s", report_out)
 
     for tier, s in tier_scores.items():
-        print(f"  {tier}  Doc-AUC={s['doc_auc']:.4f}  Doc-F1={s['doc_f1']:.4f}  FPR={s['doc_fpr']:.4f}")
+        print(
+            f"  {tier}  Doc-AUC={s['doc_auc']:.4f}"
+            f"  Doc-AUPRC={s['doc_auprc']:.4f}"
+            f"  FPR@TPR80={s['doc_fpr_at_tpr80']:.4f}"
+            f"  FPR@TPR90={s['doc_fpr_at_tpr90']:.4f}"
+        )
 
 
 if __name__ == "__main__":

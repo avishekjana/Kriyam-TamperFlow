@@ -32,7 +32,6 @@ def _result(
     f1: float = 1.0,
     confidence: float = 0.9,
     gt_label: int = 1,
-    pred_label: int = 1,
 ) -> dict:
     return {
         "region_precision": precision,
@@ -40,7 +39,6 @@ def _result(
         "region_f1": f1,
         "pred_confidence": confidence,
         "gt_label": gt_label,
-        "pred_label": pred_label,
     }
 
 
@@ -233,16 +231,17 @@ def test_aggregate_single_sample_keys() -> None:
         "doc_auc_ci",
         "doc_auprc",
         "doc_auprc_ci",
-        "doc_f1",
-        "doc_f1_ci",
-        "doc_fpr",
-        "doc_fpr_ci",
+        "doc_fpr_at_tpr80",
+        "doc_fpr_at_tpr80_ci",
+        "doc_fpr_at_tpr80_valid",
+        "doc_tpr80_achieved_tpr",
+        "doc_fpr_at_tpr85",
+        "doc_fpr_at_tpr85_ci",
+        "doc_fpr_at_tpr85_valid",
+        "doc_tpr85_achieved_tpr",
         "doc_fpr_at_tpr90",
         "doc_fpr_at_tpr90_ci",
         "doc_fpr_at_tpr90_valid",
-        "doc_f1_at_tpr90",
-        "doc_f1_at_tpr90_ci",
-        "doc_f1_at_tpr90_valid",
         "doc_tpr90_achieved_tpr",
         "n_samples",
     }
@@ -279,10 +278,10 @@ def test_aggregate_ci_lower_le_mean_le_upper() -> None:
 
 def test_aggregate_doc_auc_perfect_separation() -> None:
     results = [
-        _result(confidence=0.9, gt_label=1, pred_label=1),
-        _result(confidence=0.8, gt_label=1, pred_label=1),
-        _result(confidence=0.2, gt_label=0, pred_label=0),
-        _result(confidence=0.1, gt_label=0, pred_label=0),
+        _result(confidence=0.9, gt_label=1),
+        _result(confidence=0.8, gt_label=1),
+        _result(confidence=0.2, gt_label=0),
+        _result(confidence=0.1, gt_label=0),
     ]
     out = aggregate(results)
     assert abs(out["doc_auc"] - 1.0) < 1e-9
@@ -290,22 +289,27 @@ def test_aggregate_doc_auc_perfect_separation() -> None:
 
 def test_aggregate_doc_auc_no_discrimination() -> None:
     results = [
-        _result(confidence=0.5, gt_label=1, pred_label=1),
-        _result(confidence=0.5, gt_label=0, pred_label=0),
+        _result(confidence=0.5, gt_label=1),
+        _result(confidence=0.5, gt_label=0),
     ]
     out = aggregate(results)
     # AUC should be 0.5 for random-guess confidence scores
     assert 0.0 <= out["doc_auc"] <= 1.0
 
 
-def test_aggregate_fpr_all_correct_is_zero() -> None:
-    # Authentic sample correctly predicted as authentic (pred_label=0) → no FP
+def test_aggregate_fpr_monotone_across_tpr_targets() -> None:
+    # FPR@80 ≤ FPR@85 ≤ FPR@90 (lower TPR target → stricter threshold → lower FPR)
     results = [
-        _result(confidence=0.9, gt_label=1, pred_label=1),
-        _result(confidence=0.0, gt_label=0, pred_label=0),
+        _result(confidence=0.9, gt_label=1),
+        _result(confidence=0.8, gt_label=1),
+        _result(confidence=0.7, gt_label=1),
+        _result(confidence=0.6, gt_label=1),
+        _result(confidence=0.4, gt_label=0),
+        _result(confidence=0.3, gt_label=0),
     ]
     out = aggregate(results)
-    assert out["doc_fpr"] == pytest.approx(0.0)
+    assert out["doc_fpr_at_tpr80"] <= out["doc_fpr_at_tpr85"] + 1e-9
+    assert out["doc_fpr_at_tpr85"] <= out["doc_fpr_at_tpr90"] + 1e-9
 
 
 def test_aggregate_single_class_auc_fallback() -> None:
@@ -340,14 +344,23 @@ def test_operating_point_single_class_returns_invalid() -> None:
     assert out["achieved_tpr"] == pytest.approx(0.0)
 
 
-def test_operating_point_perfect_separation() -> None:
-    # All tampered above 0.5, all authentic below → FPR=0 at TPR=1.
+def test_operating_point_no_f1_key() -> None:
+    # f1 field was removed from the return dict in the new API.
     gt = np.array([1, 1, 0, 0])
     conf = np.array([0.9, 0.8, 0.3, 0.2])
     out = _operating_point_at_tpr(gt, conf)
     assert out["valid"] is True
     assert out["fpr"] == pytest.approx(0.0)
-    assert out["f1"] == pytest.approx(1.0)
+    assert "f1" not in out
+
+
+def test_operating_point_tpr80_lower_fpr_than_tpr90() -> None:
+    # Lower TPR target → higher threshold → fewer FP → lower or equal FPR.
+    gt = np.array([1, 1, 1, 1, 0, 0, 0, 0])
+    conf = np.array([0.95, 0.85, 0.75, 0.65, 0.55, 0.45, 0.35, 0.25])
+    op80 = _operating_point_at_tpr(gt, conf, target_tpr=0.8)
+    op90 = _operating_point_at_tpr(gt, conf, target_tpr=0.9)
+    assert op80["fpr"] <= op90["fpr"] + 1e-9
 
 
 # ---------------------------------------------------------------------------
@@ -360,18 +373,44 @@ def test_cr_perfect_robustness() -> None:
 
 
 def test_cr_total_degradation() -> None:
-    assert compression_robustness(0.9, 0.0) == pytest.approx(1.0 - 0.9 / 0.9)
+    # c0=0.9, c4=0 → CR = 0/0.9 = 0
+    assert compression_robustness(0.9, 0.0) == pytest.approx(0.0)
 
 
 def test_cr_partial_degradation() -> None:
-    # AUC drops from 0.8 to 0.6: CR = 1 - 0.2/0.8 = 0.75
+    # c0=0.8, c4=0.6 → CR = 0.6/0.8 = 0.75
     assert compression_robustness(0.8, 0.6) == pytest.approx(0.75)
 
 
-def test_cr_zero_c0_returns_one() -> None:
-    assert compression_robustness(0.0, 0.0) == pytest.approx(1.0)
-
-
-def test_cr_c4_above_c0() -> None:
+def test_cr_c4_above_c0_clamped() -> None:
     # C4 outperforms C0 — clamped to 1.0
     assert compression_robustness(0.7, 0.9) == pytest.approx(1.0)
+
+
+def test_cr_below_min_c0_returns_none() -> None:
+    # c0 < min_c0 → None
+    assert compression_robustness(0.0, 0.0) is None
+    assert compression_robustness(0.4, 0.3, min_c0=0.5) is None
+
+
+def test_cr_well_formed() -> None:
+    # c0=0.9, c4=0.8, min_c0=0.5 → 0.8/0.9 ≈ 0.889
+    result = compression_robustness(0.9, 0.8, min_c0=0.5)
+    assert result == pytest.approx(0.8 / 0.9)
+
+
+def test_cr_boundary_exactly_at_min_c0() -> None:
+    # c0 == min_c0 → returns ratio, not None
+    result = compression_robustness(0.5, 0.4, min_c0=0.5)
+    assert result == pytest.approx(0.4 / 0.5)
+
+
+def test_cr_auprc_prior_floor() -> None:
+    # AUPRC at C0=0.65 < 0.667 → None
+    assert compression_robustness(0.65, 0.5, min_c0=0.667) is None
+
+
+def test_cr_auprc_above_floor() -> None:
+    # AUPRC at C0=0.68 >= 0.667 → returns ratio
+    result = compression_robustness(0.68, 0.60, min_c0=0.667)
+    assert result == pytest.approx(0.60 / 0.68)
