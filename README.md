@@ -17,8 +17,10 @@
 
 **Kriyam TamperFlow** is the first benchmark for evaluating document tampering detection models on Indian documents. It accompanies the research paper:
 
-> *"Document Tampering Detection Benchmark: Evaluating Forensic Models on Indic Document Structures"*
-> [Author Names] — [Venue, Year]
+> *"Kriyam TamperFlow: Benchmarking Document
+Tampering Detection under Realistic Document
+Processing Pipelines"*
+> [Avishek Jana, Swati Kumari] — [2026]
 
 ### The problem
 
@@ -32,7 +34,7 @@ Kriyam makes this failure mode quantitatively visible for the first time, specif
 
 | Property | Existing benchmarks | Kriyam |
 |---|---|---|
-| Document domain | Western / generic images | Indic ID cards, invoices, medical, financial docs |
+| Document domain | Western / generic images | Medical, financial, invoices, educational, administrative docs |
 | Compression stress-test | None | Three tiers: pristine → real-world → photocopy |
 | Ground truth | Document-level or pixel masks | Per-region bounding boxes, multiple tamper types per region |
 | Evaluation | Single metric | Region-F1, Doc-AUC, FPR, Compression Robustness |
@@ -385,7 +387,7 @@ To have your model added to [LEADERBOARD.md](LEADERBOARD.md):
 1. Run the full evaluation across all tiers and doc classes
 2. Open a pull request with:
    - Your `results/your_model_name/scores.json`
-   - A model card in `model_cards/your_model_name.md` describing your architecture, training data, and any fine-tuning done on Indic documents
+   - A model card in `model_cards/your_model_name.md` describing your architecture, training data, and any fine-tuning done on documents
 3. We will verify the scores and merge
 
 ---
@@ -396,8 +398,9 @@ If you use Kriyam TamperFlow in your research, please cite:
 
 ```bibtex
 @misc{kriyamTamperFlow2026,
-  title   = {Kriyam TamperFlow: A Document Tampering Detection
-             Benchmark for Indian Documents},
+  title   = {Kriyam TamperFlow: Benchmarking Document
+Tampering Detection under Realistic Document
+Processing Pipelines},
   author  = {[Avishek Jana]},
   year    = {2026},
   url     = {https://github.com/Kriyam-ai/kriyam-tamperflow}
