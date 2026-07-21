@@ -38,7 +38,7 @@ Kriyam makes this failure mode quantitatively visible for the first time, specif
 | Document domain | Western / generic images | Medical, financial, invoices, educational, administrative docs |
 | Compression stress-test | None | Three tiers: pristine → real-world → photocopy |
 | Ground truth | Document-level or pixel masks | Per-region bounding boxes, multiple tamper types per region |
-| Evaluation | Single metric | Region-F1, Doc-AUC, FPR, Compression Robustness |
+| Evaluation | Single metric | Region-F1, Doc-AUC, Doc-AUPRC, FPR@TPR{80,85}, Compression Robustness |
 | AI-generated forgeries | Not addressed | Out of scope for v1.0 — a different forensic problem |
 
 ---
@@ -151,7 +151,7 @@ Each prediction file follows this format:
 **Field rules:**
 - `regions` (list) — predicted tampered bounding boxes. **This is the only required output field.** Leave as `[]` if your model predicts the document is authentic or produces no localisations.
 - Each region requires `x`, `y`, `w`, `h` (pixels, matching the original image coordinate space) and `confidence` (float 0–1).
-- The evaluator derives the document-level prediction automatically: `pred_confidence = max(region confidences)` if any regions exist, else `0.0`. A fixed threshold (default `0.5`, overridable via `--document-threshold`) converts this to a binary `pred_label` for Doc-F1 and FPR. Doc-AUC uses the continuous `pred_confidence` directly (threshold-free).
+- The evaluator derives the document-level prediction automatically: `pred_confidence = max(region confidences)` if any regions exist, else `0.0`. This continuous score feeds every document-level metric directly — Doc-AUC, Doc-AUPRC, and FPR@TPR{80,85,90} — all of which are threshold-free; no fixed decision threshold is used anywhere in scoring.
 - If your model outputs a heatmap, convert to bounding boxes using connected components before submitting.
 
 ### Step 5 — Validate your predictions
@@ -182,17 +182,6 @@ Every run automatically writes two files to `results/your_model_name/`:
 
 #### Common options
 
-**Set the document confidence threshold**
-
-The evaluator converts each image's `max(region confidence)` into a binary prediction using a fixed threshold (default `0.5`). Doc-F1 and FPR both depend on this threshold; Doc-AUC is always threshold-free. Use the same value across all models so results are directly comparable.
-
-```bash
-python scripts/evaluate.py \
-  --predictions predictions/your_model_name/ \
-  --document-threshold 0.3 \
-  --report-out reports/your_model_t030.html
-```
-
 **Set the region IoU threshold**
 
 Predicted regions are matched to ground-truth regions using the Hungarian algorithm. A matched pair counts as a true positive only if their IoU meets the threshold (default `0.1`, per the benchmark spec). Raising this demands tighter localisation; lowering it is more lenient.
@@ -219,13 +208,14 @@ python scripts/evaluate.py \
 
 **Choose the report template**
 
-Three HTML report layouts are available:
+Four HTML report layouts are available:
 
 | Template | Flag | Description |
 |---|---|---|
 | `v1` | `--report-template v1` | Default. Card-based layout with per-tier tables and degradation charts. |
 | `v2` | `--report-template v2` | Research-report style. Full-width stacked charts. |
 | `v3` | `--report-template v3` | Academic paper style — serif type, booktabs tables, figure captions. |
+| `v5` | `--report-template v5` | Compact dashboard — minimal whitespace. |
 
 ```bash
 python scripts/evaluate.py \
@@ -242,26 +232,26 @@ python scripts/evaluate.py \
 | `--data-dir DIR` | `./data` | Root of the benchmark data directory |
 | `--tiers C0 C2 C4` | all three | Compression tiers to evaluate |
 | `--report-out PATH` | `reports/report.html` | Output path for the HTML report |
+| `--hf-token TOKEN` | none | HuggingFace API token — only needed if annotations aren't cached locally and the dataset repo is private |
 | `--workers N` | `2` | Number of parallel worker threads for scoring |
-| `--document-threshold FLOAT` | `0.5` | Confidence threshold for binary `pred_label` (Doc-F1, FPR) |
 | `--iou-threshold FLOAT` | `0.1` | Minimum IoU for a region pair to count as a true positive |
-| `--report-template v1\|v2\|v3` | `v1` | Report layout |
+| `--report-template v1\|v2\|v3\|v5` | `v1` | Report layout |
 | `--verbose` | off | Enable debug logging |
 
-### Step 6b — Re-generate a report at a different threshold (fast)
+### Step 6b — Re-generate a report from cached results (fast)
 
-Changing `--document-threshold` re-affects only Doc-F1 and FPR. Rather than re-running the full 15–20 min evaluation, use the cached raw results:
+All metrics in this benchmark are threshold-free, so once `evaluate.py` has scored a model there is nothing to re-tune — but you may still want a different report layout or a subset of tiers without paying for a full 15–20 min re-evaluation:
 
 ```bash
 python scripts/report_from_cache.py \
   --results results/your_model_name/ \
-  --document-threshold 0.3 \
-  --report-out reports/your_model_t030.html
+  --report-template v3 \
+  --report-out reports/your_model_v3.html
 ```
 
-This reads `results/your_model_name/raw_results.jsonl`, re-applies the new threshold, and writes a new report in seconds. Add `--report-template v3` for the academic paper layout.
+This reads `results/your_model_name/raw_results.jsonl` and writes a new report in seconds — pass `--tiers` to restrict which tiers appear, or `--report-template` to switch layout.
 
-> **Note:** `report_from_cache.py` only works for `--document-threshold`. Changing `--iou-threshold` requires a full re-run with `evaluate.py`.
+> **Note:** `report_from_cache.py` re-renders from already-scored results only. Changing `--iou-threshold` affects region matching itself and requires a full re-run with `evaluate.py`.
 
 ### Step 7 — View the report
 
@@ -274,9 +264,9 @@ start reports/your_model_full.html        # Windows
 ```
 
 The report contains:
-- **Three metric tables** (one per tier: C0, C2, C4) — Region-P, Region-R, Region-F1, Doc-AUC, Doc-F1, FPR, each with 95% bootstrap CI
-- **Degradation chart** — Doc-AUC and Region-F1 plotted across C0 → C2 → C4
-- **Compression Robustness** — CR_DocAUC and CR_RegionF1 with interpretation labels
+- **Three metric tables** (one per tier: C0, C2, C4) — Region-P, Region-R, Region-F1, Doc-AUC, Doc-AUPRC, FPR@TPR80, FPR@TPR85, FPR@TPR90, each with 95% bootstrap CI
+- **Degradation chart** — Doc-AUC, Doc-AUPRC, and Region-F1 plotted across C0 → C2 → C4
+- **Compression Robustness** — CR_DocAUC, CR_AUPRC, and CR_RegionF1 with interpretation labels
 
 ---
 
@@ -286,36 +276,40 @@ The report contains:
 
 ### Per-tier scores
 
-The following six metrics are computed **independently for each compression tier** (C0, C2, C4), producing three separate result tables:
+The following metrics are computed **independently for each compression tier** (C0, C2, C4), producing three separate result tables:
 
 | Metric | Symbol | Description |
 |---|---|---|
 | Region Precision | Region-P | Fraction of predicted regions that match a ground-truth region |
 | Region Recall | Region-R | Fraction of ground-truth regions detected by the model |
 | Region F1 | Region-F1 | Harmonic mean of Region-P and Region-R |
-| Document AUC | Doc-AUC | Area under ROC curve using max(region confidence) per image |
-| Document F1 | Doc-F1 | Binary classification F1 derived from predicted regions |
-| False Positive Rate | FPR | Rate of authentic documents with at least one predicted region |
+| Document AUC-ROC | Doc-AUC | Area under ROC curve using max(region confidence) per image |
+| Document AUPRC | Doc-AUPRC | Area under the Precision-Recall curve — more informative than AUC under class imbalance; random baseline ≈ 0.667 (the tampered base rate), not 0.5 |
+| FPR at 80%/85% recall | FPR@TPR80, FPR@TPR85 | False positive rate required to catch 80%/85% of tampered documents, read off the ROC curve — no fixed threshold is chosen |
 
-Region matching uses **Hungarian assignment** with an IoU threshold of 0.1. All metrics are reported with **95% bootstrap confidence intervals** (n=1,000 resamples).
+All document-level metrics (Doc-AUC, Doc-AUPRC, FPR@TPR) are **threshold-free** — a fixed decision threshold reflects how a checkpoint happened to be calibrated during training, not how it would behave tuned for this task, so none is used anywhere in scoring. Region matching uses **Hungarian assignment** with an IoU threshold of 0.1. All metrics are reported with **95% bootstrap confidence intervals** (n=1,000 resamples).
+
+> **FPR@TPR90** is also computed and included in every `scores.json`/report for completeness, but is excluded from comparative model rankings: at this operating point, only one model in our evaluation avoids saturating at FPR=1.0, and its bootstrap CI is wide across all three tiers. A value of `1.0` for any FPR@TPR metric is a real, informative result — it means no threshold on that model's confidence scores reaches the target recall short of flagging every document as tampered.
 
 ### Compression Robustness (CR)
 
-After the three per-tier tables, two CR scores are computed to summarise how much performance degrades as forensic signals are erased by JPEG re-compression:
-
-**Detection Robustness**
+After the three per-tier tables, CR scores summarise how much performance degrades as forensic signals are erased by JPEG re-compression:
 
 ```
-CR_DocAUC = 1 − (AUC_C0 − AUC_C4) / AUC_C0
+CR = min(1.0, Metric_C4 / Metric_C0)
 ```
 
-**Localisation Robustness**
+Computed separately for Region-F1, Doc-AUC, and Doc-AUPRC:
 
 ```
-CR_RegionF1 = 1 − (RegionF1_C0 − RegionF1_C4) / RegionF1_C0
+CR_RegionF1 = min(1.0, RegionF1_C4 / RegionF1_C0)
+CR_DocAUC   = min(1.0, AUC_C4      / AUC_C0)
+CR_AUPRC    = min(1.0, AUPRC_C4    / AUPRC_C0)
 ```
 
-Both scores range from 0 to 1. A score of **1.0** means the model loses nothing across compression tiers; lower values indicate it depends on compression artifact fingerprints that are erased by re-compression.
+A CR of **1.0** means no degradation; if C4 performance exceeds C0 (which can happen from statistical variation), the score is clamped to 1.0 rather than reported above it. Lower scores indicate dependence on forensic traces that are erased by document processing.
+
+CR is only meaningful when C0 performance clears a minimum bar — a model that fails at C0 shouldn't get credit for "no degradation" simply because it fails equally everywhere. Each metric therefore has its own floor below which CR isn't reported: **0.5** for Doc-AUC (random-classifier baseline), **≈0.667** for Doc-AUPRC (the tampered-class prior), and **0.05** for Region-F1.
 
 | CR score | Interpretation |
 |---|---|
@@ -333,16 +327,17 @@ For each image:
 
   1. Load ground truth bounding boxes from annotations/
   2. Load predicted regions from predictions/your_model/
-  3. Derive document prediction from regions:
+  3. Derive document confidence from regions:
        pred_confidence = max(region confidences) if regions else 0.0
-       pred_label      = 1 if pred_confidence >= threshold else 0
-                         (default threshold: 0.5; override with --document-threshold)
   4. Build IoU matrix (GT regions × predicted regions)
   5. Run Hungarian matching → optimal assignment
   6. IoU ≥ 0.1 → TP | unmatched GT → FN | unmatched pred → FP
   7. Compute Region-P, Region-R, Region-F1
-  8. Use pred_confidence for Doc-AUC (threshold-free)
-  9. Use pred_label for Doc-F1 and FPR (threshold-dependent)
+
+Across all images in the tier:
+
+  8. Rank pred_confidence against gt_label → Doc-AUC, Doc-AUPRC (threshold-free)
+  9. Read ROC operating points at TPR=80/85/90% → FPR@TPR80/85/90 (threshold-free)
 ```
 
 ---
@@ -390,6 +385,8 @@ To have your model added to [LEADERBOARD.md](LEADERBOARD.md):
    - Your `results/your_model_name/scores.json`
    - A model card in `model_cards/your_model_name.md` describing your architecture, training data, and any fine-tuning done on documents
 3. We will verify the scores and merge
+
+**Ranking criterion:** models are ranked primarily by **Region-F1 at the C4 tier**, with Doc-AUC and Compression Robustness reported alongside as secondary criteria. We rank by C4 rather than C0 for two reasons: localisation is the principal objective in real document-verification workflows, and C4 reflects the processing conditions documents actually undergo before reaching a verification system — so the ranking embeds the benchmark's robustness requirement directly, rather than treating it as a diagnostic reported alongside an otherwise idealised C0 ranking.
 
 ---
 

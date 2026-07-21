@@ -16,8 +16,8 @@ All metrics are implemented in [`kriyam/metrics.py`](kriyam/metrics.py).
    - [Region F1](#region-f1)
 3. [Document-level metrics](#document-level-metrics)
    - [Document AUC-ROC](#document-auc-roc-doc-auc)
-   - [Document F1](#document-f1-doc-f1)
-   - [False Positive Rate](#false-positive-rate-fpr)
+   - [Document AUPRC](#document-auprc-doc-auprc)
+   - [FPR at fixed recall](#fpr-at-fixed-recall-fprtpr)
 4. [Confidence intervals](#confidence-intervals)
 5. [Compression Robustness](#compression-robustness-cr)
 6. [Per-tier reporting](#per-tier-reporting)
@@ -130,41 +130,47 @@ Doc-AUC = P(score(tampered) > score(authentic))
 
 - Ranges from 0.0 to 1.0. **0.5 = random; 1.0 = perfect separation.**
 - Computed using `sklearn.metrics.roc_auc_score` over all images in the evaluation set.
-- **Threshold-free**: unlike Doc-F1, it does not require choosing a decision boundary. This makes it the most stable metric when the authentic/tampered ratio varies between evaluation subsets.
+- **Threshold-free**: does not require choosing a decision boundary. This makes it the most stable metric when the authentic/tampered ratio varies between evaluation subsets.
 - Falls back to **0.5** (random performance) when the evaluation set contains only one class — this can happen when slicing by `--doc-class` or `--tamper-type` on small subsets.
 
 **Why AUC matters for this benchmark:** The compression tier stress-test is fundamentally about whether forensic signals survive re-compression. AUC directly measures the ranking quality of the model's confidence scores. A model whose confidence scores become indistinguishable between tampered and authentic under C4 compression will collapse toward 0.5 — this is the exact degradation the benchmark is designed to expose.
 
 ---
 
-### Document F1 (Doc-F1)
+### Document AUPRC (Doc-AUPRC)
 
-**"At its best operating point, how well does my model classify documents?"**
+**"How well does my model rank tampered documents above authentic ones, viewed through precision instead of the full ROC space?"**
+
+AUPRC (Area Under the Precision-Recall Curve) is reported alongside Doc-AUC because it is more informative under class imbalance — it is more sensitive to how well a model handles the minority (authentic) class than AUC is.
 
 ```
-Doc-F1 = 2 × Precision_doc × Recall_doc / (Precision_doc + Recall_doc)
+Doc-AUPRC = average_precision_score(gt_labels, confidences)
 ```
 
-Unlike AUC, Doc-F1 requires a **decision threshold** — the confidence value above which the model calls a document tampered. The evaluator finds the **optimal threshold** by scanning all unique confidence values in the evaluation set and selecting the one that maximises Doc-F1 (equivalent to maximising the Youden J statistic). This threshold is then used for both Doc-F1 and FPR.
+- Computed using `sklearn.metrics.average_precision_score` over all images in the evaluation set.
+- **Important — the random baseline is not 0.5.** `average_precision_score` is anchored to the positive-class prior. With 700 tampered and 350 authentic documents, a random ranker scores Doc-AUPRC ≈ **0.667** (the tampered base rate), not 0.5. Always compare a model's Doc-AUPRC against this baseline, not against the AUC convention.
+- Falls back to the tampered base rate (`gt_labels.mean()`) when the evaluation set contains only one class.
+- **Threshold-free**, like Doc-AUC — no decision boundary is chosen anywhere in its computation.
 
-- The optimal threshold is reported alongside the metric in the HTML report.
-- Because the threshold is optimised on the evaluation set itself, Doc-F1 is slightly optimistic relative to what a fixed deployment threshold would achieve. Use it as an upper-bound indicator, not as an operational specification.
-- Macro-averaged at document level, then confidence-interval wrapped via bootstrap.
+**Why AUPRC matters for this benchmark:** it gives a direct sanity check for whether a model's ranking carries signal beyond the class prior, and is the more sensitive of the two ranking metrics when a model's scores cluster near the decision boundary — a common symptom of forensic signal loss at heavier compression tiers.
 
 ---
 
-### False Positive Rate (FPR)
+### FPR at fixed recall (FPR@TPR)
 
-**"What fraction of authentic documents does my model incorrectly flag as tampered?"**
+**"What false-alarm rate would this model incur if it had to catch at least X% of tampered documents?"**
+
+Rather than committing to a single fixed decision threshold (which reflects how a model happened to be calibrated on its original training distribution, not how it would behave tuned for document verification), the benchmark reports the false positive rate required to reach specific recall (TPR) targets, read directly off each model's ROC curve:
 
 ```
-FPR = FP_doc / (FP_doc + TN_doc)
+FPR@TPR{t} = fpr at the first ROC point where tpr >= t
 ```
 
-- Computed at the same optimal threshold used for Doc-F1.
-- Ranges from 0.0 (no authentic documents flagged) to 1.0 (all authentic documents flagged).
-- **Lower is better.** In a real fraud-detection pipeline, a high FPR means legitimate documents are frequently rejected — a direct operational cost.
-- The benchmark dataset has 350 authentic documents out of 1,050, so there are 350 opportunities to produce false positives. This realistic imbalance (roughly 33% authentic) reflects actual fraud-detection pipelines where most submitted documents are genuine.
+- Reported at **t = 80% and 85%** recall (`FPR@TPR80`, `FPR@TPR85`) — these are the two operating points used in comparative model rankings.
+- **t = 90%** (`FPR@TPR90`) is also computed and included in every `scores.json`/report for completeness, but is **excluded from comparative analysis**: at this operating point, only one model in evaluation avoids saturating at FPR = 1.0, and its bootstrap CIs are consistently wide across all three compression tiers, making cross-model comparison unreliable at t=90.
+- Each operating point carries a `valid` flag: `true` when some threshold on that model's confidence scores actually reaches the target TPR, `false` when it doesn't. A reported FPR of **1.0** with `valid = false` is a real, informative result — it means no threshold reaches the target recall short of flagging every document as tampered — not a measurement failure.
+- **Threshold-free** in the sense that no single deployment threshold is chosen by the benchmark; the reported FPR is the best achievable value at the requested recall, computed independently per tier.
+- Implementation: `_operating_point_at_tpr()` in `kriyam/metrics.py`, which locates the smallest ROC-curve index where `tpr >= target_tpr` (the highest threshold that still clears the target, giving the lowest FPR at that recall).
 
 ---
 
@@ -192,26 +198,34 @@ The random seed is fixed at **42** for reproducibility — identical inputs alwa
 
 CR scores answer the central research question of this benchmark: **how much does a model degrade as JPEG re-compression erases forensic artifact signals?**
 
-Two CR scores are computed — one for detection quality, one for localisation quality.
-
-### CR for detection (CR_DocAUC)
+Three CR scores are computed — for detection (two ranking metrics) and for localisation:
 
 ```
-CR_DocAUC = 1 − (AUC_C0 − AUC_C4) / AUC_C0
+CR = min(1.0, Metric_C4 / Metric_C0)
+```
+
+### CR for detection (CR_DocAUC, CR_AUPRC)
+
+```
+CR_DocAUC = min(1.0, AUC_C4   / AUC_C0)
+CR_AUPRC  = min(1.0, AUPRC_C4 / AUPRC_C0)
 ```
 
 ### CR for localisation (CR_RegionF1)
 
 ```
-CR_RegionF1 = 1 − (RegionF1_C0 − RegionF1_C4) / RegionF1_C0
+CR_RegionF1 = min(1.0, RegionF1_C4 / RegionF1_C0)
 ```
 
 **Properties:**
-- Ranges from **−∞ to 1.0** in theory, but in practice falls between 0.0 and 1.0.
-- **1.0** = no degradation. The model performs identically at C0 and C4.
-- **0.0** = the model's performance at C4 is zero. Complete collapse.
-- **Values above 1.0** mean the model performs *better* under heavy compression than on pristine images — `AUC_C4 > AUC_C0`. This can happen by chance on small evaluation sets, or occasionally when a model's heuristics fire more reliably on the noise patterns that compression introduces. Treat any value above 1.0 as effectively equal to 1.0 (no degradation).
-- Defined as **1.0** when `AUC_C0 = 0` to avoid division by zero.
+- Ranges from **0.0 to 1.0** by construction — the ratio is explicitly clamped at 1.0.
+- **1.0** = no degradation (including the case where the model performs *better* at C4 than C0 — `Metric_C4 > Metric_C0` can happen by chance on small evaluation sets, or occasionally when a model's heuristics fire more reliably on the noise patterns that compression introduces; this is clamped to 1.0 rather than reported above it).
+- **0.0** = the model's C4 performance is zero. Complete collapse.
+- **Undefined below a metric-specific floor**: CR is only meaningful when C0 performance itself clears a minimum bar — a model that fails at C0 shouldn't get credit for "no degradation" simply because it fails equally at every tier. Each metric therefore has a `min_c0` floor below which the CR score is reported as **N/A** (not computed) rather than as a misleadingly high ratio:
+  - **Doc-AUC**: floor `0.5` (the random-classifier baseline)
+  - **Doc-AUPRC**: floor `≈0.667` (the tampered-class prior for this benchmark's 700/350 split — see [Document AUPRC](#document-auprc-doc-auprc))
+  - **Region-F1**: floor `0.05` (very weak localisation still yields a non-trivial CR)
+- Implementation: `compression_robustness()` in `kriyam/metrics.py`.
 
 **Interpretation guide:**
 
@@ -248,9 +262,12 @@ The degradation from C0 → C2 → C4 is the **primary experimental finding** th
 | Region-R | Region Recall | [0, 1] | Higher | Yes | `match_regions()` |
 | Region-F1 | Region F1 | [0, 1] | Higher | Yes | `match_regions()` |
 | Doc-AUC | Document AUC-ROC | [0, 1] | Higher | Yes | `aggregate()` via `roc_auc_score` |
-| Doc-F1 | Document F1 at optimal threshold | [0, 1] | Higher | Yes | `aggregate()` |
-| FPR | False Positive Rate | [0, 1] | Lower | Yes | `aggregate()` |
-| CR_DocAUC | Compression Robustness (detection) | (−∞, 1] | Higher | No (C0 vs C4) | `compression_robustness()` |
-| CR_RegionF1 | Compression Robustness (localisation) | (−∞, 1] | Higher | No (C0 vs C4) | `compression_robustness()` |
+| Doc-AUPRC | Document AUPRC | [0, 1] (random ≈ 0.667) | Higher | Yes | `aggregate()` via `average_precision_score` |
+| FPR@TPR80 | FPR at 80% recall | [0, 1] | Lower | Yes | `aggregate()` via `_operating_point_at_tpr()` |
+| FPR@TPR85 | FPR at 85% recall | [0, 1] | Lower | Yes | `aggregate()` via `_operating_point_at_tpr()` |
+| FPR@TPR90 | FPR at 90% recall (reported, not used in comparative rankings) | [0, 1] | Lower | Yes | `aggregate()` via `_operating_point_at_tpr()` |
+| CR_DocAUC | Compression Robustness (detection, AUC) | [0, 1] or N/A | Higher | No (C0 vs C4) | `compression_robustness()` |
+| CR_AUPRC | Compression Robustness (detection, AUPRC) | [0, 1] or N/A | Higher | No (C0 vs C4) | `compression_robustness()` |
+| CR_RegionF1 | Compression Robustness (localisation) | [0, 1] or N/A | Higher | No (C0 vs C4) | `compression_robustness()` |
 
-All per-tier metrics are reported with **95% bootstrap CI** (n = 1,000 resamples, seed = 42).
+All per-tier metrics are reported with **95% bootstrap CI** (n = 1,000 resamples, seed = 42). Models are ranked primarily by **Region-F1 at C4**, with Doc-AUC and CR reported as secondary criteria.
