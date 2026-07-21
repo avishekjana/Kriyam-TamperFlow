@@ -1053,7 +1053,7 @@ def _degradation_charts(tier_scores: dict[str, Any]) -> str:
 {localisation_js}"""
 
 
-_GH_URL   = "https://github.com/Kriyam-ai/kriyam-tamperflow"
+_GH_URL   = "https://github.com/avishekjana/Kriyam-TamperFlow"
 _HF_URL   = "https://huggingface.co/datasets/kriyam-ai/kriyam-tamperflow"
 _LABS_URL = "https://labs.kriyam.ai/"
 

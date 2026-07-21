@@ -83,8 +83,8 @@ You do not need to modify this codebase or implement any interface. Run your mod
 ### Step 1 — Clone and install
 
 ```bash
-git clone https://github.com/Kriyam-ai/kriyam-tamperflow
-cd kriyam-tamperflow
+git clone https://github.com/avishekjana/Kriyam-TamperFlow
+cd Kriyam-TamperFlow
 pip install -e ".[dev]"
 ```
 
@@ -401,7 +401,7 @@ Tampering Detection under Realistic Document
 Processing Pipelines},
   author  = {[Avishek Jana]},
   year    = {2026},
-  url     = {https://github.com/Kriyam-ai/kriyam-tamperflow}
+  url     = {https://github.com/avishekjana/Kriyam-TamperFlow}
 }
 ```
 
