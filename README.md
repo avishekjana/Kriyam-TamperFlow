@@ -408,6 +408,8 @@ Processing Pipelines},
 }
 ```
 
+**Repository DOI:** [https://doi.org/10.5281/zenodo.21469087](https://doi.org/10.5281/zenodo.21469087)
+
 ---
 
 ## License
