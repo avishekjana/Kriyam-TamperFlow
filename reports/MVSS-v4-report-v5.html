@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kriyam TamperFlow &mdash; MVSS-v4</title>
+  <style>
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #f0f2f5;
+  margin: 0;
+  padding: 0.6rem 0.75rem 2.5rem;
+}
+
+.page { max-width: 1100px; margin: 0 auto; }
+
+/* ── header ── */
+.v5-header {
+  background: #111827;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  margin-bottom: 0.55rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.v5-bench {
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.v5-header h1 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0;
+  color: #f9fafb;
+}
+.v5-meta {
+  font-size: 0.7rem;
+  color: #6b7280;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ── section card ── */
+.section {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem 1.1rem;
+  margin-bottom: 0.55rem;
+}
+.section h2 {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 0.2rem;
+}
+.section .tier-desc {
+  font-size: 0.72rem;
+  color: #6b7280;
+  margin: 0 0 0.55rem;
+}
+
+/* ── tables ── */
+table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+thead th {
+  background: #f9fafb;
+  text-align: left;
+  padding: 0.28rem 0.65rem;
+  border-bottom: 2px solid #e5e7eb;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  font-weight: 600;
+}
+tbody td {
+  padding: 0.28rem 0.65rem;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #fafafa; }
+.metric-name { font-weight: 500; color: #374151; }
+.metric-val  { font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; }
+.ci-range    { font-size: 0.68rem; color: #9ca3af; }
+.tier-stripe { border-left: 3px solid var(--tier-color); }
+
+/* merged tier table */
+.mtt-tier-hdr {
+  text-align: center !important;
+  border-top: 3px solid currentColor;
+  padding-top: 0.35rem !important;
+}
+.mtt-tier-name { display: block; font-size: 0.72rem; font-weight: 700; }
+.mtt-tier-desc { display: block; font-size: 0.61rem; font-weight: 400; text-transform: none;
+                 letter-spacing: 0; color: #9ca3af; margin-top: 0.05rem; }
+.mtt-cell { text-align: center; vertical-align: middle !important; }
+.mtt-val  { display: block; font-size: 0.88rem; font-weight: 700; color: #111827;
+            font-variant-numeric: tabular-nums; }
+.mtt-ci   { display: block; font-size: 0.62rem; color: #9ca3af; margin: 0.05rem 0 0.12rem; }
+.mtt-spark-hdr { text-align: center !important; color: #9ca3af !important; font-weight: 500 !important; }
+.mtt-spark { text-align: center; vertical-align: middle !important; padding: 0.12rem 0.65rem !important; }
+.metric-group-header td {
+  padding: 0.3rem 0.65rem 0.18rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  border-top: 1px solid #e5e7eb;
+}
+.metric-group-header.first-group td { border-top: none; }
+
+/* CI tags */
+.ci-tag {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.08rem 0.38rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.ci-confident { background: #d1fae5; color: #065f46; }
+.ci-moderate  { background: #fef3c7; color: #92400e; }
+.ci-wide      { background: #fee2e2; color: #991b1b; }
+
+/* n-note */
+.n-note { font-size: 0.68rem; color: #9ca3af; margin: 0.35rem 0 0; text-align: right; }
+
+/* ── compact CR strip ── */
+.v5-cr-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 540px) { .v5-cr-strip { grid-template-columns: 1fr; } }
+.v5-cr-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  border-left: 3px solid #3b82f6;
+  padding: 0.55rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.v5-cr-val {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #111827;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.v5-cr-meta { flex: 1; min-width: 0; }
+.v5-cr-label { font-size: 0.72rem; font-weight: 700; color: #374151; }
+.v5-cr-formula { font-size: 0.63rem; color: #9ca3af; font-style: italic; }
+.v5-cr-remark { font-size: 0.65rem; font-weight: 600; margin-top: 0.15rem; }
+.v5-cr-remark.good    { color: #16a34a; }
+.v5-cr-remark.neutral { color: #d97706; }
+.v5-cr-remark.bad     { color: #dc2626; }
+.v5-cr-remark.na      { color: #9ca3af; }
+
+/* ── chart grids ── */
+.charts-row-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 520px) { .charts-row-2 { grid-template-columns: 1fr; } }
+.charts-row-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 640px) { .charts-row-3 { grid-template-columns: 1fr; } }
+.charts-row-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+@media (max-width: 860px) { .charts-row-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 440px) { .charts-row-4 { grid-template-columns: 1fr; } }
+.span-full { grid-column: 1 / -1; }
+
+.chart-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem 0.5rem;
+}
+.chart-card h3 { font-size: 0.75rem; font-weight: 700; color: #111827; margin: 0 0 0.08rem; }
+.chart-card .chart-sub { font-size: 0.63rem; color: #6b7280; margin: 0 0 0.45rem; }
+.chart-card canvas { max-height: 155px; }
+.hb-badge {
+  font-size: 0.52rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; padding: 0.07rem 0.3rem;
+  border-radius: 999px; vertical-align: middle; white-space: nowrap;
+  background: #eef2ff; color: #4338ca;
+}
+.chart-remark {
+  font-size: 0.65rem; margin: 0.4rem 0 0; padding: 0.3rem 0.5rem;
+  border-radius: 5px; line-height: 1.4;
+}
+.chart-remark .remark-arrow { font-weight: 700; margin-right: 0.1rem; }
+.chart-remark.good    { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.chart-remark.bad     { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.chart-remark.neutral { background: #f9fafb; color: #6b7280; border: 1px solid #e5e7eb; }
+
+/* chart group headings */
+.v5-chart-h {
+  font-size: 0.63rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.09em; color: #9ca3af;
+  margin: 0.65rem 0 0.3rem;
+}
+
+/* footer */
+.v5-footer {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: #111827;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: #6b7280;
+}
+.v5-footer a { color: #9ca3af; text-decoration: none; }
+.v5-footer a:hover { color: #f9fafb; }
+
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+<div class="page">
+
+  <div class="v5-header">
+    <span class="v5-bench">Kriyam TamperFlow</span>
+    <h1>MVSS-v4</h1>
+    <span class="v5-meta">1,050 docs &middot; 700 tampered &middot; 350 authentic &middot; Benchmark v1.0</span>
+  </div>
+
+  
+
+  
+<div class="section" style="padding-left:0;padding-right:0">
+  <table>
+    <thead>
+      <tr><th>Metric</th><th class='mtt-tier-hdr' style='color:#16a34a'><span class='mtt-tier-name'>C0</span><span class='mtt-tier-desc'>Pristine</span></th><th class='mtt-tier-hdr' style='color:#d97706'><span class='mtt-tier-name'>C2</span><span class='mtt-tier-desc'>Double-pass JPEG</span></th><th class='mtt-tier-hdr' style='color:#dc2626'><span class='mtt-tier-name'>C4</span><span class='mtt-tier-desc'>Photocopy simulation</span></th><th class='mtt-spark-hdr'>Trend</th></tr>
+    </thead>
+    <tbody>
+      <tr class='metric-group-header first-group'><td colspan='5'>Localisation Metrics</td></tr>
+      <tr><td class='metric-name'>Region Precision (Region-P)</td><td class='mtt-cell'><span class='mtt-val'>0.1849</span><span class='mtt-ci'>[0.165, 0.205]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>0.1855</span><span class='mtt-ci'>[0.166, 0.207]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>0.1587</span><span class='mtt-ci'>[0.139, 0.178]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,5.6 44.0,5.0 83.0,29.0" fill="none" stroke="#dc2626" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="5.6" r="2.8" fill="#dc2626"/><circle cx="44.0" cy="5.0" r="2.8" fill="#dc2626"/><circle cx="83.0" cy="29.0" r="2.8" fill="#dc2626"/></svg></td></tr><tr><td class='metric-name'>Region Recall (Region-R)</td><td class='mtt-cell'><span class='mtt-val'>0.0998</span><span class='mtt-ci'>[0.087, 0.114]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>0.0976</span><span class='mtt-ci'>[0.084, 0.112]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>0.0861</span><span class='mtt-ci'>[0.072, 0.100]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,5.0 44.0,8.8 83.0,29.0" fill="none" stroke="#dc2626" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="5.0" r="2.8" fill="#dc2626"/><circle cx="44.0" cy="8.8" r="2.8" fill="#dc2626"/><circle cx="83.0" cy="29.0" r="2.8" fill="#dc2626"/></svg></td></tr><tr><td class='metric-name'>Region F1 (Region-F1)</td><td class='mtt-cell'><span class='mtt-val'>0.1036</span><span class='mtt-ci'>[0.092, 0.116]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>0.1032</span><span class='mtt-ci'>[0.091, 0.116]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>0.0843</span><span class='mtt-ci'>[0.073, 0.096]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,5.0 44.0,5.5 83.0,29.0" fill="none" stroke="#dc2626" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="5.0" r="2.8" fill="#dc2626"/><circle cx="44.0" cy="5.5" r="2.8" fill="#dc2626"/><circle cx="83.0" cy="29.0" r="2.8" fill="#dc2626"/></svg></td></tr>
+      <tr class='metric-group-header'><td colspan='5'>Document-Level Classification</td></tr>
+      <tr><td class='metric-name'>Document AUC-ROC (Doc-AUC)</td><td class='mtt-cell'><span class='mtt-val'>0.6988</span><span class='mtt-ci'>[0.669, 0.728]</span><span class='ci-tag ci-moderate'>Moderate</span></td><td class='mtt-cell'><span class='mtt-val'>0.7120</span><span class='mtt-ci'>[0.683, 0.742]</span><span class='ci-tag ci-moderate'>Moderate</span></td><td class='mtt-cell'><span class='mtt-val'>0.6893</span><span class='mtt-ci'>[0.661, 0.718]</span><span class='ci-tag ci-moderate'>Moderate</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,19.0 44.0,5.0 83.0,29.0" fill="none" stroke="#dc2626" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="19.0" r="2.8" fill="#dc2626"/><circle cx="44.0" cy="5.0" r="2.8" fill="#dc2626"/><circle cx="83.0" cy="29.0" r="2.8" fill="#dc2626"/></svg></td></tr><tr><td class='metric-name'>Document AUPRC (Doc-AUPRC)</td><td class='mtt-cell'><span class='mtt-val'>0.7729</span><span class='mtt-ci'>[0.743, 0.802]</span><span class='ci-tag ci-moderate'>Moderate</span></td><td class='mtt-cell'><span class='mtt-val'>0.7811</span><span class='mtt-ci'>[0.754, 0.810]</span><span class='ci-tag ci-moderate'>Moderate</span></td><td class='mtt-cell'><span class='mtt-val'>0.7685</span><span class='mtt-ci'>[0.741, 0.799]</span><span class='ci-tag ci-moderate'>Moderate</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,20.7 44.0,5.0 83.0,29.0" fill="none" stroke="#dc2626" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="20.7" r="2.8" fill="#dc2626"/><circle cx="44.0" cy="5.0" r="2.8" fill="#dc2626"/><circle cx="83.0" cy="29.0" r="2.8" fill="#dc2626"/></svg></td></tr><tr><td class='metric-name'>FPR @ TPR=80% (FPR@80)</td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[0.384, 1.000]</span><span class='ci-tag ci-wide'>Less stable</span></td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,29.0 44.0,29.0 83.0,29.0" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="29.0" r="2.8" fill="#9ca3af"/><circle cx="44.0" cy="29.0" r="2.8" fill="#9ca3af"/><circle cx="83.0" cy="29.0" r="2.8" fill="#9ca3af"/></svg></td></tr><tr><td class='metric-name'>FPR @ TPR=85% (FPR@85)</td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,29.0 44.0,29.0 83.0,29.0" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="29.0" r="2.8" fill="#9ca3af"/><circle cx="44.0" cy="29.0" r="2.8" fill="#9ca3af"/><circle cx="83.0" cy="29.0" r="2.8" fill="#9ca3af"/></svg></td></tr><tr><td class='metric-name'>FPR @ TPR=90% (FPR@90)</td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-cell'><span class='mtt-val'>1.0000</span><span class='mtt-ci'>[1.000, 1.000]</span><span class='ci-tag ci-confident'>Confident</span></td><td class='mtt-spark'><svg width="88" height="34" viewBox="0 0 88 34" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:auto"><polyline points="5.0,29.0 44.0,29.0 83.0,29.0" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5.0" cy="29.0" r="2.8" fill="#9ca3af"/><circle cx="44.0" cy="29.0" r="2.8" fill="#9ca3af"/><circle cx="83.0" cy="29.0" r="2.8" fill="#9ca3af"/></svg></td></tr>
+    </tbody>
+  </table>
+  <p class="n-note" style="padding-right:1.5rem">C0: 1,050 samples &nbsp;·&nbsp; C2: 1,050 samples &nbsp;·&nbsp; C4: 1,050 samples</p>
+</div>
+
+  <div class="v5-cr-strip">
+  <div class='v5-cr-card' style='border-left-color:#3b82f6'><span class='v5-cr-val'>0.986</span><div class='v5-cr-meta'><div class='v5-cr-label'>CR<sub>DocAUC</sub></div><div class='v5-cr-formula'>AUC<sub>C4</sub>&thinsp;/&thinsp;AUC<sub>C0</sub></div><div class='v5-cr-remark good'>Excellent</div></div></div>
+  <div class='v5-cr-card' style='border-left-color:#0ea5e9'><span class='v5-cr-val'>0.994</span><div class='v5-cr-meta'><div class='v5-cr-label'>CR<sub>AUPRC</sub></div><div class='v5-cr-formula'>AUPRC<sub>C4</sub>&thinsp;/&thinsp;AUPRC<sub>C0</sub></div><div class='v5-cr-remark good'>Excellent</div></div></div>
+  <div class='v5-cr-card' style='border-left-color:#10b981'><span class='v5-cr-val'>0.814</span><div class='v5-cr-meta'><div class='v5-cr-label'>CR<sub>RegionF1</sub></div><div class='v5-cr-formula'>F1<sub>C4</sub>&thinsp;/&thinsp;F1<sub>C0</sub></div><div class='v5-cr-remark neutral'>Moderate loss</div></div></div>
+</div>
+
+  
+<p class="v5-chart-h">Document-Level Detection</p>
+<div class="charts-row-2">
+  <div class="chart-card">
+    <h3>Doc-AUC <span class="hb-badge">↑ higher is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5AucChart" height="200"></canvas>
+    <p class="chart-remark bad"><span class="remark-arrow">▼</span>Worsens by 0.009 (0.699 → 0.689) as compression increases C0 → C4.</p>
+  </div>
+  <div class="chart-card">
+    <h3>Doc-AUPRC <span class="hb-badge">↑ higher is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5AuprcChart" height="200"></canvas>
+    <p class="chart-remark neutral"><span class="remark-arrow">▬</span>Stable across tiers (0.773 → 0.769).</p>
+  </div>
+</div>
+<p class="v5-chart-h">TPR-Anchored FPR</p>
+<div class="charts-row-3">
+  <div class="chart-card">
+    <h3>FPR @ TPR=80 <span class="hb-badge">↓ lower is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5Fpr80Chart" height="200"></canvas>
+    <p class="chart-remark neutral"><span class="remark-arrow">▬</span>Stable across tiers (1.000 → 1.000).</p>
+  </div>
+  <div class="chart-card">
+    <h3>FPR @ TPR=85 <span class="hb-badge">↓ lower is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5Fpr85Chart" height="200"></canvas>
+    <p class="chart-remark neutral"><span class="remark-arrow">▬</span>Stable across tiers (1.000 → 1.000).</p>
+  </div>
+  <div class="chart-card">
+    <h3>FPR @ TPR=90 <span class="hb-badge">↓ lower is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5Fpr90Chart" height="200"></canvas>
+    <p class="chart-remark neutral"><span class="remark-arrow">▬</span>Stable across tiers (1.000 → 1.000).</p>
+  </div>
+</div>
+<p class="v5-chart-h">Localisation</p>
+<div class="charts-row-3">
+  <div class="chart-card">
+    <h3>Region P <span class="hb-badge">↑ higher is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5LocPChart" height="200"></canvas>
+    <p class="chart-remark bad"><span class="remark-arrow">▼</span>Worsens by 0.026 (0.185 → 0.159) as compression increases C0 → C4.</p>
+  </div>
+  <div class="chart-card">
+    <h3>Region R <span class="hb-badge">↑ higher is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5LocRChart" height="200"></canvas>
+    <p class="chart-remark bad"><span class="remark-arrow">▼</span>Worsens by 0.014 (0.100 → 0.086) as compression increases C0 → C4.</p>
+  </div>
+  <div class="chart-card">
+    <h3>Region F1 <span class="hb-badge">↑ higher is better</span></h3>
+    <p class="chart-sub">Across C0 → C2 → C4</p>
+    <canvas id="v5LocF1Chart" height="200"></canvas>
+    <p class="chart-remark bad"><span class="remark-arrow">▼</span>Worsens by 0.019 (0.104 → 0.084) as compression increases C0 → C4.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5AucChart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "Doc-AUC",
+          data: [0.698755, 0.712031, 0.689314],
+          borderColor: '#3b82f6',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#3b82f6',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          min: 0, max: 1, ticks: { stepSize: 0.2 },
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5AuprcChart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "Doc-AUPRC",
+          data: [0.772911, 0.781129, 0.768527],
+          borderColor: '#0ea5e9',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#0ea5e9',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          min: 0, max: 1, ticks: { stepSize: 0.2 },
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5Fpr80Chart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "FPR @ TPR=80",
+          data: [1.0, 1.0, 1.0],
+          borderColor: '#f43f5e',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#f43f5e',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5Fpr85Chart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "FPR @ TPR=85",
+          data: [1.0, 1.0, 1.0],
+          borderColor: '#e11d48',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#e11d48',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5Fpr90Chart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "FPR @ TPR=90",
+          data: [1.0, 1.0, 1.0],
+          borderColor: '#be123c',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#be123c',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5LocPChart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "Region P",
+          data: [0.184863, 0.18552, 0.158711],
+          borderColor: '#06b6d4',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#06b6d4',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5LocRChart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "Region R",
+          data: [0.099797, 0.097643, 0.086131],
+          borderColor: '#f59e0b',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#f59e0b',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  new Chart(document.getElementById('v5LocF1Chart'), {
+    type: 'line',
+    data: {
+      labels: ["C0", "C2", "C4"],
+      datasets: [
+        {
+          label: "Region F1",
+          data: [0.103588, 0.103162, 0.084329],
+          borderColor: '#10b981',
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#10b981',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(4) : 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f3f4f6' }
+        },
+        x: { grid: { color: '#f3f4f6' } }
+      }
+    }
+  });
+})();
+</script>
+
+  <div class="v5-footer">
+    <span>Kriyam TamperFlow &mdash; Evaluation Report</span>
+    <span>
+      <a href="https://github.com/Kriyam-ai/kriyam-tamperflow" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://huggingface.co/datasets/kriyam-ai/kriyam-tamperflow" target="_blank" rel="noopener">HuggingFace</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://labs.kriyam.ai/" target="_blank" rel="noopener">Kriyam Labs</a>
+    </span>
+  </div>
+
+</div>
+</body>
+</html>

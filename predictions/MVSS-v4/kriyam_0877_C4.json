@@ -1,0 +1,23 @@
+{
+    "id": "kriyam_0877_C4",
+    "model": "MVSSNet",
+    "is_authentic": true,
+    "is_ai_generated": false,
+    "confidence": 1.0,
+    "regions": [
+        {
+            "x": 117,
+            "y": 291,
+            "w": 36,
+            "h": 108,
+            "confidence": 1.0
+        },
+        {
+            "x": 136,
+            "y": 453,
+            "w": 5,
+            "h": 8,
+            "confidence": 1.0
+        }
+    ]
+}

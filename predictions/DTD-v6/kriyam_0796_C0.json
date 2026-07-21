@@ -1,0 +1,18 @@
+{
+    "id": "kriyam_0796_C0",
+    "model": "DTD",
+    "is_authentic": true,
+    "is_ai_generated": false,
+    "confidence": 0.67431640625,
+    "regions": [
+        {
+            "x": 560,
+            "y": 935,
+            "w": 15,
+            "h": 10,
+            "area": 137,
+            "area_ratio": 5.983577917540182e-05,
+            "confidence": 0.67431640625
+        }
+    ]
+}

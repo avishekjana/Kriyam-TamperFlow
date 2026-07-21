@@ -1,0 +1,17 @@
+{
+    "id": "kriyam_0763_C0",
+    "model": "ADCD",
+    "is_authentic": true,
+    "is_ai_generated": false,
+    "confidence": 0.5024405121803284,
+    "regions": [
+        {
+            "x": 32,
+            "y": 882,
+            "w": 6,
+            "h": 5,
+            "confidence": 0.5024405121803284,
+            "area": 10
+        }
+    ]
+}

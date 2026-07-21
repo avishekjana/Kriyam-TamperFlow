@@ -1,0 +1,16 @@
+{
+    "id": "kriyam_0774_C0",
+    "model": "CAFTB",
+    "is_authentic": false,
+    "is_ai_generated": false,
+    "confidence": 1.0,
+    "regions": [
+        {
+            "x": 0,
+            "y": 0,
+            "w": 1570,
+            "h": 1175,
+            "confidence": 0.299818217754364
+        }
+    ]
+}

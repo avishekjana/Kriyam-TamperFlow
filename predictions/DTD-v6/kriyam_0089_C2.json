@@ -1,0 +1,45 @@
+{
+    "id": "kriyam_0089_C2",
+    "model": "DTD",
+    "is_authentic": true,
+    "is_ai_generated": false,
+    "confidence": 0.673828125,
+    "regions": [
+        {
+            "x": 2178,
+            "y": 791,
+            "w": 5,
+            "h": 6,
+            "area": 26,
+            "area_ratio": 3.1007663186175734e-06,
+            "confidence": 0.58154296875
+        },
+        {
+            "x": 2189,
+            "y": 790,
+            "w": 20,
+            "h": 9,
+            "area": 162,
+            "area_ratio": 1.9320159369847957e-05,
+            "confidence": 0.59716796875
+        },
+        {
+            "x": 2112,
+            "y": 991,
+            "w": 15,
+            "h": 6,
+            "area": 67,
+            "area_ratio": 7.990436282591439e-06,
+            "confidence": 0.673828125
+        },
+        {
+            "x": 2221,
+            "y": 1257,
+            "w": 21,
+            "h": 30,
+            "area": 495,
+            "area_ratio": 5.9033820296757646e-05,
+            "confidence": 0.595703125
+        }
+    ]
+}

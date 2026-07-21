@@ -1,0 +1,37 @@
+{
+    "id": "kriyam_0223_C2",
+    "model": "MVSSNet",
+    "is_authentic": false,
+    "is_ai_generated": false,
+    "confidence": 1.0,
+    "regions": [
+        {
+            "x": 238,
+            "y": 262,
+            "w": 114,
+            "h": 34,
+            "confidence": 1.0
+        },
+        {
+            "x": 440,
+            "y": 276,
+            "w": 17,
+            "h": 6,
+            "confidence": 1.0
+        },
+        {
+            "x": 675,
+            "y": 372,
+            "w": 197,
+            "h": 45,
+            "confidence": 1.0
+        },
+        {
+            "x": 768,
+            "y": 513,
+            "w": 512,
+            "h": 162,
+            "confidence": 1.0
+        }
+    ]
+}

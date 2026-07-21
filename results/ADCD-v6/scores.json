@@ -1,0 +1,153 @@
+{
+  "model": "ADCD-v6",
+  "iou_threshold": 0.1,
+  "tiers": {
+    "C0": {
+      "region_precision": 0.08034276776042076,
+      "region_precision_ci": [
+        0.0696988773329032,
+        0.09267492414945097
+      ],
+      "region_recall": 0.11835086091399882,
+      "region_recall_ci": [
+        0.10410494303534927,
+        0.13288384183211216
+      ],
+      "region_f1": 0.07948517842711686,
+      "region_f1_ci": [
+        0.06968393970738505,
+        0.0904410946688822
+      ],
+      "doc_auc": 0.7168285714285715,
+      "doc_auc_ci": [
+        0.6867558870515136,
+        0.7474671069684022
+      ],
+      "doc_auprc": 0.8274346075473666,
+      "doc_auprc_ci": [
+        0.7995504846922733,
+        0.855635562542372
+      ],
+      "doc_fpr_at_tpr80": 0.49142857142857144,
+      "doc_fpr_at_tpr80_ci": [
+        0.4022860221674877,
+        0.5574879711307137
+      ],
+      "doc_fpr_at_tpr80_valid": true,
+      "doc_tpr80_achieved_tpr": 0.8,
+      "doc_fpr_at_tpr85": 0.6,
+      "doc_fpr_at_tpr85_ci": [
+        0.5112797119153052,
+        0.6742028121272989
+      ],
+      "doc_fpr_at_tpr85_valid": true,
+      "doc_tpr85_achieved_tpr": 0.85,
+      "doc_fpr_at_tpr90": 0.7085714285714285,
+      "doc_fpr_at_tpr90_ci": [
+        0.6379809168116239,
+        0.7920801086566551
+      ],
+      "doc_fpr_at_tpr90_valid": true,
+      "doc_tpr90_achieved_tpr": 0.9014285714285715,
+      "n_samples": 1050
+    },
+    "C2": {
+      "region_precision": 0.06364597567242229,
+      "region_precision_ci": [
+        0.05379001528774354,
+        0.07363664338326915
+      ],
+      "region_recall": 0.08766468580098763,
+      "region_recall_ci": [
+        0.07501692465679542,
+        0.09987414144132564
+      ],
+      "region_f1": 0.0598154879680677,
+      "region_f1_ci": [
+        0.05140410347858831,
+        0.06905837688278427
+      ],
+      "doc_auc": 0.7156102040816326,
+      "doc_auc_ci": [
+        0.6850771831834453,
+        0.7486584165745418
+      ],
+      "doc_auprc": 0.8408411149174362,
+      "doc_auprc_ci": [
+        0.8156360936074456,
+        0.8667842051329236
+      ],
+      "doc_fpr_at_tpr80": 0.5314285714285715,
+      "doc_fpr_at_tpr80_ci": [
+        0.47168648229516674,
+        0.6054258961311083
+      ],
+      "doc_fpr_at_tpr80_valid": true,
+      "doc_tpr80_achieved_tpr": 0.8,
+      "doc_fpr_at_tpr85": 0.6228571428571429,
+      "doc_fpr_at_tpr85_ci": [
+        0.5420847416706905,
+        0.7143052837573386
+      ],
+      "doc_fpr_at_tpr85_valid": true,
+      "doc_tpr85_achieved_tpr": 0.85,
+      "doc_fpr_at_tpr90": 0.78,
+      "doc_fpr_at_tpr90_ci": [
+        0.6675108225108225,
+        0.8337820518207871
+      ],
+      "doc_fpr_at_tpr90_valid": true,
+      "doc_tpr90_achieved_tpr": 0.9,
+      "n_samples": 1050
+    },
+    "C4": {
+      "region_precision": 0.06133291807597081,
+      "region_precision_ci": [
+        0.05114931159380365,
+        0.07277754955386384
+      ],
+      "region_recall": 0.07295361849931255,
+      "region_recall_ci": [
+        0.062390667304743505,
+        0.0841248375249165
+      ],
+      "region_f1": 0.05335996932623861,
+      "region_f1_ci": [
+        0.04462753544449242,
+        0.06248724922843744
+      ],
+      "doc_auc": 0.7674408163265306,
+      "doc_auc_ci": [
+        0.7375293096810065,
+        0.7953668308813612
+      ],
+      "doc_auprc": 0.8639172828533953,
+      "doc_auprc_ci": [
+        0.8386796423674738,
+        0.8885512432263524
+      ],
+      "doc_fpr_at_tpr80": 0.4057142857142857,
+      "doc_fpr_at_tpr80_ci": [
+        0.34258942161339423,
+        0.47059638259736025
+      ],
+      "doc_fpr_at_tpr80_valid": true,
+      "doc_tpr80_achieved_tpr": 0.8,
+      "doc_fpr_at_tpr85": 0.48,
+      "doc_fpr_at_tpr85_ci": [
+        0.4092047691010052,
+        0.5785677220483906
+      ],
+      "doc_fpr_at_tpr85_valid": true,
+      "doc_tpr85_achieved_tpr": 0.85,
+      "doc_fpr_at_tpr90": 0.6542857142857142,
+      "doc_fpr_at_tpr90_ci": [
+        0.5612363067292645,
+        0.7275287421296135
+      ],
+      "doc_fpr_at_tpr90_valid": true,
+      "doc_tpr90_achieved_tpr": 0.9,
+      "n_samples": 1050
+    }
+  }
+}

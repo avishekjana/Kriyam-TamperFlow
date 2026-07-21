@@ -1,0 +1,25 @@
+{
+    "id": "kriyam_0544_C4",
+    "model": "FFDN",
+    "confidence": 0.8869,
+    "regions": [
+        {
+            "x": 1224,
+            "y": 723,
+            "w": 10,
+            "h": 8,
+            "area": 67,
+            "ratio": 1.7e-05,
+            "confidence": 0.8869
+        },
+        {
+            "x": 755,
+            "y": 2161,
+            "w": 42,
+            "h": 13,
+            "area": 339,
+            "ratio": 8.8e-05,
+            "confidence": 0.7857
+        }
+    ]
+}

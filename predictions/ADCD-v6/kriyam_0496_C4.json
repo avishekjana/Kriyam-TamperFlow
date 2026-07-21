@@ -1,0 +1,33 @@
+{
+    "id": "kriyam_0496_C4",
+    "model": "ADCD",
+    "is_authentic": true,
+    "is_ai_generated": false,
+    "confidence": 0.6949737668037415,
+    "regions": [
+        {
+            "x": 501,
+            "y": 808,
+            "w": 21,
+            "h": 26,
+            "confidence": 0.6949737668037415,
+            "area": 162
+        },
+        {
+            "x": 1165,
+            "y": 1924,
+            "w": 25,
+            "h": 74,
+            "confidence": 0.5179911851882935,
+            "area": 465
+        },
+        {
+            "x": 1633,
+            "y": 1968,
+            "w": 28,
+            "h": 27,
+            "confidence": 0.6413330435752869,
+            "area": 213
+        }
+    ]
+}

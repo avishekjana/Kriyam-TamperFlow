@@ -1,0 +1,16 @@
+{
+    "id": "kriyam_0969_C2",
+    "model": "FFDN",
+    "confidence": 0.8641,
+    "regions": [
+        {
+            "x": 553,
+            "y": 1158,
+            "w": 25,
+            "h": 41,
+            "area": 859,
+            "ratio": 0.000898,
+            "confidence": 0.8641
+        }
+    ]
+}

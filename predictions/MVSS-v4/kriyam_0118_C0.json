@@ -1,0 +1,51 @@
+{
+    "id": "kriyam_0118_C0",
+    "model": "MVSSNet",
+    "is_authentic": true,
+    "is_ai_generated": false,
+    "confidence": 1.0,
+    "regions": [
+        {
+            "x": 1003,
+            "y": 212,
+            "w": 523,
+            "h": 192,
+            "confidence": 1.0
+        },
+        {
+            "x": 1798,
+            "y": 562,
+            "w": 184,
+            "h": 144,
+            "confidence": 1.0
+        },
+        {
+            "x": 674,
+            "y": 678,
+            "w": 290,
+            "h": 220,
+            "confidence": 1.0
+        },
+        {
+            "x": 475,
+            "y": 864,
+            "w": 14,
+            "h": 61,
+            "confidence": 1.0
+        },
+        {
+            "x": 233,
+            "y": 980,
+            "w": 19,
+            "h": 48,
+            "confidence": 1.0
+        },
+        {
+            "x": 417,
+            "y": 2371,
+            "w": 67,
+            "h": 6,
+            "confidence": 0.93670654296875
+        }
+    ]
+}

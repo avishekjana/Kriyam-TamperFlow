@@ -1,0 +1,37 @@
+{
+    "id": "kriyam_0824_C2",
+    "model": "CAFTB",
+    "is_authentic": false,
+    "is_ai_generated": false,
+    "confidence": 1.0,
+    "regions": [
+        {
+            "x": 213,
+            "y": 316,
+            "w": 91,
+            "h": 44,
+            "confidence": 0.2898990511894226
+        },
+        {
+            "x": 435,
+            "y": 322,
+            "w": 68,
+            "h": 20,
+            "confidence": 0.2574072480201721
+        },
+        {
+            "x": 307,
+            "y": 558,
+            "w": 3,
+            "h": 5,
+            "confidence": 0.2751253545284271
+        },
+        {
+            "x": 420,
+            "y": 385,
+            "w": 2,
+            "h": 1,
+            "confidence": 0.36865389347076416
+        }
+    ]
+}

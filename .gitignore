@@ -3,9 +3,9 @@ data/*
 kriyam-tamperflow-dataset
 kriyam-tamperflow-dataset/*
 # Prediction submissions and evaluation output
-predictions/*
-results/*
-reports/*
+# predictions/*
+# results/*
+# reports/*
 
 # Python
 __pycache__/

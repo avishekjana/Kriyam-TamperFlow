@@ -1,0 +1,43 @@
+{
+    "id": "kriyam_0128_C2",
+    "model": "FFDN",
+    "confidence": 0.948,
+    "regions": [
+        {
+            "x": 181,
+            "y": 746,
+            "w": 15,
+            "h": 29,
+            "area": 364,
+            "ratio": 4.2e-05,
+            "confidence": 0.948
+        },
+        {
+            "x": 1525,
+            "y": 1087,
+            "w": 11,
+            "h": 8,
+            "area": 77,
+            "ratio": 9e-06,
+            "confidence": 0.7772
+        },
+        {
+            "x": 1008,
+            "y": 1465,
+            "w": 7,
+            "h": 9,
+            "area": 59,
+            "ratio": 7e-06,
+            "confidence": 0.7038
+        },
+        {
+            "x": 1001,
+            "y": 1477,
+            "w": 6,
+            "h": 14,
+            "area": 77,
+            "ratio": 9e-06,
+            "confidence": 0.8193
+        }
+    ]
+}
