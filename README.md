@@ -9,6 +9,7 @@
   <a href="https://huggingface.co/datasets/kriyam-ai/kriyam-tamperflow"><img src="https://img.shields.io/badge/🤗%20HuggingFace-Dataset-yellow" alt="HuggingFace Dataset"/></a>
   <a href="LEADERBOARD.md"><img src="https://img.shields.io/badge/Leaderboard-View%20Results-blue" alt="Leaderboard"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green.svg" alt="License"/></a>
+  <a href="https://doi.org/10.5281/zenodo.21469087"><img src="https://zenodo.org/badge/1290755967.svg" alt="DOI"/></a>
 </p>
 
 ---
