@@ -1,7 +1,7 @@
 # Kriyam TamperFlow
 
 <p align="center">
-  <img src="assets/images/banner3.png" alt="Kriyam TamperFlow" width="900"/>
+  <img src="assets/images/banner-new.png" alt="Kriyam TamperFlow" width="900"/>
 </p>
 
 <p align="center">
