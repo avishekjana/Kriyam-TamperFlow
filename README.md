@@ -14,6 +14,25 @@
 
 ---
 
+## Table of Contents
+
+- [What is this?](#what-is-this)
+  - [What makes this benchmark different](#what-makes-this-benchmark-different)
+- [Dataset](#dataset)
+  - [Tampering types](#tampering-types)
+  - [Compression tiers](#compression-tiers)
+- [Evaluate your model](#evaluate-your-model)
+- [Metrics](#metrics)
+  - [Per-tier scores](#per-tier-scores)
+  - [Compression Robustness (CR)](#compression-robustness-cr)
+- [How scoring works](#how-scoring-works)
+- [Repository structure](#repository-structure)
+- [Submit to the leaderboard](#submit-to-the-leaderboard)
+- [Citation](#citation)
+- [License](#license)
+
+---
+
 ## What is this?
 
 **Kriyam TamperFlow** is the first benchmark for evaluating document tampering detection models on Indian documents. It accompanies the research paper:
